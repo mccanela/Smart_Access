@@ -1,0 +1,13 @@
+{
+  "name": "smartaccess",
+  "version": "1.0.0",
+  "description": "Smart Access Flutter Portaria - Cloudflare Worker",
+  "type": "module",
+  "scripts": {
+    "build": "flutter build web --release",
+    "deploy": "npm run build && npx wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

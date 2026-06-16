@@ -1,0 +1,26 @@
+# Arquivos temporários
+*.tmp
+*.temp
+*.bak
+*.backup
+*.log
+
+# Arquivos de backup do desenvolvimento
+*_backup*.dart
+*_old.dart
+*.backup.dart
+*.backup
+
+# Arquivos de configuração local
+.local
+.env
+.env.local
+
+# Cache e builds temporários
+.dart_tool/
+.packages
+pubspec.lock.bak
+
+# Documentação temporária
+*.md.bak
+README_temp.md
