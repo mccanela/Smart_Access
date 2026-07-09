@@ -18,7 +18,6 @@ class ConectConIAPanel extends StatefulWidget {
 class _ConectConIAPanelState extends State<ConectConIAPanel> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  String _hint = 'Pergunte a ConectCon IA';
 
   bool _isLoading = false;
   String? _respostaDaIA;
@@ -28,11 +27,6 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
-  }
-
-  void _selecionarModo(String hint) {
-    setState(() => _hint = hint);
-    _focusNode.requestFocus();
   }
 
 // Funçao auxiliar para obter condomínio ID do SignalR (preferencial) ou ApiConfig
@@ -128,6 +122,7 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = isDarkMode(context);
     // Trocado "Center" por "Align" no topo + SingleChildScrollView para rolagem
     return Align(
       alignment: Alignment.topCenter,
@@ -153,31 +148,29 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 decoration: BoxDecoration(
                   color: getFormGrisColor(context),
-                  borderRadius: BorderRadius.circular(28),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: getBorderColor(context)),
                 ),
                 child: Row(
                   children: [
-                    IconButton(
-                      onPressed: () {},
-                      tooltip: 'Adicionar anexo',
-                      icon: Icon(Icons.add,
-                          color: getSecondaryTextColor(context)),
-                    ),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: TextField(
                         controller: _controller,
                         focusNode: _focusNode,
                         onSubmitted: (_) => _enviar(),
                         decoration: InputDecoration(
-                          hintText: _hint,
+                          hintText: "Pergunte a NOVIA-X",
                           hintStyle:
                               TextStyle(color: getSecondaryTextColor(context)),
                           border: InputBorder.none,
                           isDense: true,
                         ),
                         style: TextStyle(
-                            color: getTextColor(context), fontSize: 15),
+                          color: isDark ? Colors.white70 : Colors.black,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w300,
+                        ),
                       ),
                     ),
                     Container(
@@ -192,12 +185,12 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
                         tooltip: 'Enviar',
                         icon: _isLoading
                             ? const SizedBox(
-                                width: 18,
-                                height: 18,
+                                width: 16,
+                                height: 16,
                                 child: CircularProgressIndicator(
                                     color: Colors.white, strokeWidth: 2))
                             : const Icon(Icons.arrow_upward,
-                                color: Colors.white, size: 18),
+                                color: Colors.white, size: 16),
                       ),
                     ),
                   ],

@@ -49,8 +49,7 @@ class SegmentedTabBar extends StatelessWidget {
                         const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(10),
-                      color:
-                          selected == i ? segmentColor : Colors.transparent,
+                      color: selected == i ? segmentColor : Colors.transparent,
                       boxShadow: selected == i
                           ? [
                               BoxShadow(
@@ -100,9 +99,7 @@ class SegmentedTabBar extends StatelessWidget {
               final withTooltip = (tooltips != null && i < tooltips!.length)
                   ? Tooltip(message: tooltips![i], child: widget)
                   : widget;
-              return selected == i
-                  ? Expanded(child: withTooltip)
-                  : withTooltip;
+              return selected == i ? Expanded(child: withTooltip) : withTooltip;
             }(),
           ],
         ],
@@ -137,12 +134,14 @@ class SegmentedTabBar extends StatelessWidget {
       if (l.contains('passagens')) return Icons.directions_walk;
       if (l.contains('agendamentos')) return Icons.calendar_today;
       if (l.contains('avulso')) return Icons.badge;
-      if (l.contains('unidade') || l.contains('unidades')) return Icons.business;
-      if (l.contains('veículos') || l.contains('veiculo')) return Icons.directions_car;
+      if (l.contains('unidade') || l.contains('unidades'))
+        return Icons.business;
+      if (l.contains('veículos') || l.contains('veiculo'))
+        return Icons.directions_car;
       if (l.contains('vagas')) return Symbols.garage;
       if (l.contains('encomendas')) return Symbols.package_2;
       if (l.contains('entregar')) return Symbols.hand_package;
-      if (l.contains('conectcon') || l.contains(' ia') || l == 'ia') {
+      if (l.contains('novia') || l.contains(' ia') || l == 'ia') {
         return Icons.smart_toy_outlined;
       }
       return Icons.help_outline;

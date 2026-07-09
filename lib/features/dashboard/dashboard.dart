@@ -2740,11 +2740,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Column(
                   children: [
                     SegmentedTabBar(
-                      labels: const ['ConectCon IA'],
+                      labels: const ['NOVIA-X'],
+                      // ADICIONE A PROPRIEDADE ICONS AQUI 👇
                       tooltips: const ['Assistente de IA ConectCon'],
                       selected: 0,
                       onChanged: (_) {},
-                      color: const Color(0xFF00BFA5),
+                      color: const Color(0xFF6F34C4),
                     ),
                     // Passando o ID para o painel e fechando o parêntese corretamente
                     Expanded(
@@ -8882,7 +8883,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   //-----------------------------//
   // Widget para filtros de entrada
   //-----------------------------//
-  Widget _buildFiltrosEntrada() {
+  Widget _buildFiltrosEntrada1x() {
     // Se minimizado, não renderizar nada
     if (_filtroEntradaMinimizado) {
       return const SizedBox.shrink();
@@ -9352,6 +9353,441 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildFiltrosEntrada() {
+    // Se minimizado, não renderizar nada
+    if (_filtroEntradaMinimizado) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: getFormGrisColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: getBorderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Segmented control removido - agora está no topo do painel
+
+          // Campos baseados no tipo selecionado
+          if (_tipoFiltroEntrada == 0) ...[
+            // Modo Avulso: Documento e Nome
+            Row(
+              children: [
+                Expanded(
+                  child: CharacterCounterField(
+                    controller: _filtroDocumentoEntradaController,
+                    labelText:
+                        _tipoFiltroEntrada == 0 ? 'Documento' : 'Documento',
+                    maxLength: 14,
+                    decoration: _getInputDecorationComErro(
+                      context,
+                      _tipoFiltroEntrada == 0 ? 'Documento' : 'Documento',
+                      'documento_entrada',
+                      _erroDocumentoEntrada,
+                    ),
+                    enableInteractiveSelection: true,
+                    readOnly: false,
+                    onChanged: (value) {
+                      setState(() {
+                        // Remove erro quando o usuário digita
+                        if (_erroDocumentoEntrada && value.trim().isNotEmpty) {
+                          _erroDocumentoEntrada = false;
+                        }
+                        // Se documento está preenchido, remove obrigatoriedade do nome
+                        if (value.trim().isNotEmpty &&
+                            _tipoFiltroEntrada == 0) {
+                          _erroNomeEntrada = false;
+                        }
+                      });
+                    },
+                    onSubmitted: (value) {
+                      if (value.trim().isNotEmpty) {
+                        setState(() {
+                          _erroDocumentoEntrada = false;
+                          _erroNomeEntrada = false;
+                          _filtroEntradaMinimizado = false;
+                        });
+                        _buscarEntradasFiltradas();
+                      } else {
+                        setState(() {
+                          _erroDocumentoEntrada = true;
+                        });
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: CharacterCounterField(
+                    controller: _filtroNomeEntradaController,
+                    labelText: 'Nome e Sobrenome',
+                    maxLength: 50,
+                    decoration: _getInputDecorationComErro(
+                      context,
+                      'Nome e Sobrenome',
+                      'nome',
+                      _erroNomeEntrada,
+                    ),
+                    enableInteractiveSelection: true,
+                    readOnly: false,
+                    onChanged: (value) {
+                      // Remove erro quando o usuário digita
+                      if (_erroNomeEntrada && value.trim().isNotEmpty) {
+                        setState(() {
+                          _erroNomeEntrada = false;
+                        });
+                      }
+                      if (value.trim().isNotEmpty && _tipoFiltroEntrada == 0) {
+                        setState(() {
+                          _erroDocumentoEntrada = false;
+                        });
+                      }
+                    },
+                    onSubmitted: (value) {
+                      final documento =
+                          _filtroDocumentoEntradaController.text.trim();
+                      if (documento.isNotEmpty) {
+                        setState(() {
+                          _erroDocumentoEntrada = false;
+                          _erroNomeEntrada = false;
+                          _filtroEntradaMinimizado = false;
+                        });
+                        _buscarEntradasFiltradas();
+                      } else {
+                        setState(() {
+                          _erroDocumentoEntrada = true;
+                        });
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TransparentIconGroup([
+                  IconActionData(
+                    icon: Symbols.ink_eraser,
+                    tooltip: 'Limpar filtros',
+                    color: IconColors.delete(context),
+                    onPressed: () {
+                      _filtroDocumentoEntradaController.clear();
+                      _filtroNomeEntradaController.clear();
+                      setState(() {
+                        _mostrarFormEntrada = false;
+                        _erroDocumentoEntrada = false;
+                        _erroNomeEntrada = false;
+                        _convidadosResultados.clear();
+                        _cardsExpandidos.clear();
+                      });
+                      _fecharPainelLateral();
+                    },
+                  ),
+                  // Removida condicional: botão Buscar (lupa) deve sempre aparecer antes de Novo Cadastro
+                  IconActionData(
+                    icon: Symbols.search,
+                    tooltip: 'Buscar visitante',
+                    color: IconColors.search(context),
+                    onPressed: () {
+                      final documento =
+                          _filtroDocumentoEntradaController.text.trim();
+                      final nome = _filtroNomeEntradaController.text.trim();
+
+                      if (_tipoFiltroEntrada == 0) {
+                        // Modo Avulso: pelo menos um campo deve estar preenchido
+                        if (documento.isEmpty && nome.isEmpty) {
+                          setState(() {
+                            _erroDocumentoEntrada = true;
+                            _erroNomeEntrada = true;
+                          });
+                          return;
+                        }
+                      }
+
+                      // Remove erros se campos estão preenchidos e expande filtro
+                      setState(() {
+                        _erroDocumentoEntrada = false;
+                        _erroNomeEntrada = false;
+                        _filtroEntradaMinimizado =
+                            false; // Expandir ao buscar visitante
+                      });
+                      _buscarEntradasFiltradas();
+                    },
+                    isLoading: _loadingBuscaEntrada,
+                  ),
+                  IconActionData(
+                    icon: Symbols.person_add,
+                    tooltip: 'Novo Cadastro',
+                    color: IconColors.play(context),
+                    onPressed: () {
+                      // Limpar campos e abrir formulário de novo cadastro
+                      _filtroDocumentoEntradaController.clear();
+                      _filtroNomeEntradaController.clear();
+                      setState(() {
+                        _mostrarFormEntrada = true;
+                        _isNovoUsuario = true;
+                        _isAgendamento = false;
+                        _erroDocumentoEntrada = false;
+                        _erroNomeEntrada = false;
+                        _convidadosResultados.clear();
+                      });
+                    },
+                  ),
+                ]),
+              ],
+            ),
+          ] else ...[
+            // Modo Agendamentos: Documento, Nome, Unidade, Período
+            // Primeira linha: Documento (linha inteira para evitar truncamento)
+            Row(
+              children: [
+                Expanded(
+                  child: CharacterCounterField(
+                    controller: _filtroDocumentoEntradaController,
+                    labelText: 'Documento',
+                    maxLength: 14,
+                    decoration: _getInputDecorationComErro(
+                      context,
+                      'Documento',
+                      'documento_entrada',
+                      _erroDocumentoEntrada,
+                    ),
+                    enableInteractiveSelection: true,
+                    readOnly: false,
+                    onChanged: (value) {
+                      if (_erroDocumentoEntrada && value.trim().isNotEmpty) {
+                        setState(() {
+                          _erroDocumentoEntrada = false;
+                        });
+                      }
+                    },
+                    onSubmitted: (_) {
+                      final temData = _filtroDataInicioEntrada != null ||
+                          _filtroDataFimEntrada != null;
+
+                      if (!temData) {
+                        setState(() {
+                          _erroDataEntrada = true;
+                        });
+                        return;
+                      }
+
+                      setState(() {
+                        _erroDataEntrada = false;
+                        _erroDocumentoEntrada = false;
+                        _erroNomeEntrada = false;
+                      });
+
+                      final espacosSelecionados =
+                          _espacosSocialList.where((espaco) {
+                        final id = espaco['espacopublico_id'] as int? ?? 0;
+                        return _espacosSociaisSelecionadosFiltro[id] == true;
+                      }).toList();
+
+                      final espacosParaBusca = espacosSelecionados.isNotEmpty
+                          ? espacosSelecionados
+                          : _espacosSocialList;
+
+                      _buscarAgendamentosEntradaFiltrados(
+                          espacosSelecionados: espacosParaBusca);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Segunda linha: Nome e Sobrenome (linha inteira)
+            Row(
+              children: [
+                Expanded(
+                  child: CharacterCounterField(
+                    controller: _filtroNomeEntradaController,
+                    labelText: 'Nome e Sobrenome',
+                    maxLength: 50,
+                    decoration: _getInputDecoration(
+                        context, 'Nome e Sobrenome', 'nome'),
+                    enableInteractiveSelection: true,
+                    readOnly: false,
+                    onSubmitted: (_) {
+                      final temData = _filtroDataInicioEntrada != null ||
+                          _filtroDataFimEntrada != null;
+
+                      if (!temData) {
+                        setState(() {
+                          _erroDataEntrada = true;
+                        });
+                        return;
+                      }
+
+                      setState(() {
+                        _erroDataEntrada = false;
+                        _erroDocumentoEntrada = false;
+                        _erroNomeEntrada = false;
+                      });
+
+                      final espacosSelecionados =
+                          _espacosSocialList.where((espaco) {
+                        final id = espaco['espacopublico_id'] as int? ?? 0;
+                        return _espacosSociaisSelecionadosFiltro[id] == true;
+                      }).toList();
+
+                      final espacosParaBusca = espacosSelecionados.isNotEmpty
+                          ? espacosSelecionados
+                          : _espacosSocialList;
+
+                      _buscarAgendamentosEntradaFiltrados(
+                          espacosSelecionados: espacosParaBusca);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Terceira linha: Unidade
+            Row(
+              children: [
+                Expanded(
+                  child: LayoutBuilder(builder: (context, constraints) {
+                    return buildStandardAutocomplete<Map<String, dynamic>>(
+                      key: ValueKey(_unidadeFiltroAplicada),
+                      context: context,
+                      labelText: 'Unidade',
+                      items: _unidadesList,
+                      itemAsString: (option) => unidadeLabelComMorador(option),
+                      selectedItem: _unidadeFiltroSelecionada,
+                      onSelected: (value) {
+                        setState(() {
+                          _unidadeFiltroSelecionada = value;
+                          _unidadeFiltroAplicada =
+                              value != null ? value['apto_id'] : null;
+                        });
+                      },
+                      constraints: constraints,
+                    );
+                  }),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Terceira linha: Período (ocupando largura total)
+            _buildPeriodFilter(
+              context: context,
+              startDate: _filtroDataInicioEntrada,
+              endDate: _filtroDataFimEntrada,
+              hintText: 'período *',
+              temErro: _erroDataEntrada,
+              onStartDateChanged: (date) {
+                setState(() {
+                  _filtroDataInicioEntrada = date;
+                  if (date != null) {
+                    _erroDataEntrada = false;
+                  }
+                });
+              },
+              onEndDateChanged: (date) {
+                setState(() {
+                  _filtroDataFimEntrada = date;
+                  if (date != null) {
+                    _erroDataEntrada = false;
+                  }
+                });
+              },
+            ),
+
+            // 2. Painel de Filtros de Agendamento (Sempre visível)
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: isDarkMode(context)
+                    ? const Color(0xFF374151)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: getBorderColor(context).withValues(alpha: 0.2)),
+              ),
+              child: _buildCardsTiposAgendamentoContent(
+                  transparent: true, isFullWidth: false),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Quarta linha: Botões de Açao
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TransparentIconGroup([
+                  IconActionData(
+                    icon: Symbols.ink_eraser,
+                    tooltip: 'Limpar filtros',
+                    color: IconColors.delete(context),
+                    onPressed: () {
+                      _filtroDocumentoEntradaController.clear();
+                      _filtroUnidadeEntradaController.clear();
+                      _filtroNomeEntradaController.clear();
+                      setState(() {
+                        _filtroDataEntrada = null;
+                        _filtroDataInicioEntrada = null;
+                        _filtroDataFimEntrada = null;
+                        _unidadeFiltroSelecionada = null;
+                        _unidadeFiltroAplicada = null;
+                        _espacoSocialSelecionado = null;
+                        _mostrarFormEntrada = false;
+                        _erroDocumentoEntrada = false;
+                        _erroNomeEntrada = false;
+                        _erroDataEntrada = false;
+                        _convidadosResultados.clear();
+                        _cardsExpandidos.clear();
+                      });
+                      _fecharPainelLateral();
+                    },
+                    isOpaque: false,
+                  ),
+                  IconActionData(
+                    icon: Symbols.search,
+                    tooltip: 'Pesquisar convidados',
+                    color: IconColors.search(context),
+                    onPressed: () {
+                      if (_filtroEntradaMinimizado) {
+                        setState(() {
+                          _filtroEntradaMinimizado = false;
+                        });
+                      } else {
+                        // Se não minimizado, realiza a busca com os filtros atuais
+                        final espacosSelecionados =
+                            _espacosSocialList.where((espaco) {
+                          final id = espaco['espacopublico_id'] as int? ?? 0;
+                          return _espacosSociaisSelecionadosFiltro[id] == true;
+                        }).toList();
+                        final espacosParaBusca = espacosSelecionados.isNotEmpty
+                            ? espacosSelecionados
+                            : _espacosSocialList;
+                        _buscarAgendamentosEntradaFiltrados(
+                            espacosSelecionados: espacosParaBusca);
+                      }
+                    },
+                    isLoading: _loadingBuscaAgendamentos,
+                  ),
+                ]),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   //-----------------------------//
   // Funçao auxiliar para obter ícone baseado no nome
   //-----------------------------//
@@ -9399,11 +9835,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
-  //-----------------------------//
-  // Widget para cards de tipos de agendamento
-  //-----------------------------//
-
-  // Novo método extraído para reutilizaçao
   Widget _buildCardsTiposAgendamentoContent(
       {bool transparent = false, bool isFullWidth = false}) {
     if (_loadingEspacosSocial) {
@@ -9420,14 +9851,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     final List<Widget> items = [];
+
     final isDark = isDarkMode(context);
 
     for (int i = 0; i < _espacosSocialList.length; i++) {
       final espaco = _espacosSocialList[i];
+
       final id = espaco['espacopublico_id'] as int? ?? 0;
+
       var descricao = espaco['espacopublico_ds'] as String? ?? '';
+
       descricao = descricao.replaceAll('Temporária', 'Temporaria');
+
       final icone = espaco['icone'] as String?;
+
       final isSelected = _espacosSociaisSelecionadosFiltro[id] ?? false;
 
       Widget itemContent = InkWell(
@@ -9440,15 +9877,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Tooltip(
           message: descricao,
           child: Container(
-            height: 48,
-            alignment: Alignment.center,
+            alignment: Alignment.centerLeft,
             child: Stack(
-              alignment: Alignment.center,
+              alignment: Alignment.centerLeft,
               clipBehavior: Clip.none,
               children: [
                 Icon(
                   _getIconData(icone),
-                  size: 30, // Reduzi levemente para caber melhor na altura 48
+
+                  size: 26, // Reduzi levemente para caber melhor na altura 48
+
                   color: isSelected
                       ? const Color(0xFF2E74FF)
                       : (isDark ? Colors.white70 : Colors.grey.shade600),
@@ -9459,7 +9897,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     right: -4,
                     child: Icon(
                       Icons.check_rounded,
-                      size: 18,
+                      size: 16,
                       color: Color(0xFF2E74FF),
                     ),
                   ),
@@ -9472,15 +9910,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (isFullWidth) {
         items.add(Expanded(child: itemContent));
       } else {
-        items.add(SizedBox(width: 60, child: itemContent));
-      }
-
-      if (i < _espacosSocialList.length - 1) {
-        items.add(Container(
-          width: 1,
-          height: 16, // Altura ajustada para divisória sutil
-          color: (isDark ? Colors.white : Colors.grey).withValues(alpha: 0.3),
-        ));
+        items.add(SizedBox(width: 42, child: itemContent));
       }
     }
 
