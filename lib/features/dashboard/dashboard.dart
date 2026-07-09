@@ -48,6 +48,7 @@ import 'widgets/standard_autocomplete.dart';
 import 'widgets/mini_segmented.dart';
 import 'widgets/transparent_icon_group.dart';
 import 'widgets/dashboard_small_widgets.dart';
+import 'widgets/conectcon_ia_panel.dart';
 import 'services/encomenda_fetch_service.dart';
 import 'services/reference_data_service.dart';
 
@@ -308,7 +309,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // true = pode editar/cadastrar (S), false = somente leitura (N), null = ainda não verificado
   bool? _permissaoAcessoPessoas;
   final int _tabPassagensSaidas = 0; // 0: Passagens, 1: Saídas
-  int _tabEncom = 0; // 0: Encomendas, 1: Entregar
+  // int _tabEncom = 0; // 0: Encomendas, 1: Entregar
   int? _tabUnidades; // 0: Unidade, 1: Veículos, 2: Vagas
   int _tipoPessoa = 1; // 0: P. Serviá§o, 1: Visitante
   int _tabAvulsoAgendamentosSaidas = 0; // 0: Avulso, 1: Agendamentos, 2: Saídas
@@ -2233,6 +2234,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             FloatingNavigationButton(
               currentPage: _currentPage,
               onTogglePage: _togglePage,
+              totalPages: 3,
             ),
           // Botoeiras FAB integrado na Stack
           if (_hasBotoeiras)
@@ -2358,13 +2360,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildTabletLayout() {
     // Layout Tabulado para tablet
     // Página 0: Entrada e Passagens (Principais)
-    // Página 1: Unidades e Encomendas
+    // Página 1: Unidades
+    // Página 2: ConectCon IA
 
     // Verificar permissões
     final showEntrada =
         PermissionService().hasPermission(40); // Registro de Entrada
     final showUnidades = PermissionService().hasPermission(32); // Unidades
-    final showEncomendas = PermissionService().hasPermission(41); // Encomendas
 
     if (_currentPage == 0) {
       List<Widget> children = [];
@@ -2374,10 +2376,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
       children.add(Expanded(child: _panelPassagens()));
 
-      // Se todas escondidas, mostrar vazio ou algo
       if (children.isEmpty) return const Center(child: Text("Sem acesso"));
 
-      // Remove ultimo separador se existir
       if (children.isNotEmpty && children.last.key == const Key('separator')) {
         children.removeLast();
       }
@@ -2386,29 +2386,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: children,
       );
-    } else {
-      List<Widget> children = [];
-      if (showUnidades) {
-        children.add(Expanded(child: _panelUnidades()));
-        children.add(const VerticalSeparator());
-      }
-      if (showEncomendas) {
-        children.add(Expanded(child: _panelEncomendas()));
-      }
-
-      // Remove ultimo separador se existir
-      // Note: _buildVerticalSeparator logic inside children add
-
-      // Fix visual glitch if trailing separator
-      if (children.isNotEmpty && children.last is! Expanded) {
-        // Logic is tricky with stateless widgets, but let's assume standard array manipulation
-      }
-
-      if (children.isEmpty) return const Center(child: Text("Sem acesso"));
+    } else if (_currentPage == 1) {
+      if (!showUnidades) return const Center(child: Text("Sem acesso"));
 
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: children,
+        children: [
+          Expanded(child: _panelUnidades()),
+        ],
+      );
+    } else {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: _panelConectConIA()),
+        ],
       );
     }
   }
@@ -2418,7 +2410,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final showEntrada =
         PermissionService().hasPermission(40); // Registro de Entrada
     final showUnidades = PermissionService().hasPermission(32); // Unidades
-    final showEncomendas = PermissionService().hasPermission(41); // Encomendas
 
     List<Widget> children = [];
 
@@ -2434,10 +2425,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       children.add(Expanded(child: _panelUnidades()));
     }
 
-    if (showEncomendas) {
-      children.add(const VerticalSeparator());
-      children.add(Expanded(child: _panelEncomendas()));
-    }
+    children.add(const VerticalSeparator());
+    children.add(Expanded(child: _panelConectConIA()));
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2447,7 +2436,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _togglePage() {
     setState(() {
-      _currentPage = (_currentPage + 1) % 2;
+      _currentPage = (_currentPage + 1) % 3;
     });
   }
 
@@ -2729,6 +2718,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             Expanded(child: _entradaForm()),
                         ],
                       ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+// Adicionei o parâmetro condominioId na função chamadora
+  Widget _panelConectConIA() {
+    return DashboardCard(
+      child: FocusScope(
+        canRequestFocus: true,
+        child: FocusTraversalGroup(
+          policy: WidgetOrderTraversalPolicy(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    SegmentedTabBar(
+                      labels: const ['ConectCon IA'],
+                      tooltips: const ['Assistente de IA ConectCon'],
+                      selected: 0,
+                      onChanged: (_) {},
+                      color: const Color(0xFF00BFA5),
+                    ),
+                    // Passando o ID para o painel e fechando o parêntese corretamente
+                    Expanded(
+                      child: ConectConIAPanel(),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -3378,7 +3401,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                             .toString()) ??
                                                     0;
                                         print(
-                                            'ðŸ¢ Unidade ID encontrado no convidado: $unidadeId');
+                                            ' Unidade ID encontrado no convidado: $unidadeId');
                                       }
 
                                       // Se não encontrou, buscar na lista de unidades
@@ -6487,41 +6510,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Painel 4 - Encomendas (Enviar/Entregar)
+  // Painel 4 - Encomendas
   Widget _panelEncomendas() {
     return DashboardCard(
-      child: FocusScope(
-        canRequestFocus: true,
-        child: FocusTraversalGroup(
-          policy: WidgetOrderTraversalPolicy(),
-          child: Column(
-            children: [
-              SegmentedTabBar(
-                labels: const ['Encomendas', 'Entregar'],
-                tooltips: const [
-                  'Envio de encomendas',
-                  'Entrega de encomendas'
-                ],
-                selected: _tabEncom,
-                onChanged: (i) async {
-                  setState(() => _tabEncom = i);
-                  // Quando mudar para entregar, carregar o histórico de encomendas
-                  if (i == 1) {
-                    await _fetchHistoricos();
-                  }
-                },
-                color: const Color(0xFFF39C12),
-              ),
-              const SizedBox(height: 12),
-              if (_tabEncom == 0) _enviarForm() else _entregarList(),
-            ],
+      child: Center(
+        child: ElevatedButton.icon(
+          icon: const Icon(Icons.open_in_new),
+          label: const Text('Ir para módulo de encomendas'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFF39C12),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            textStyle:
+                const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
+          onPressed: () {
+            html.window.open('https://encomendas.conectcon.net', '_blank');
+          },
         ),
       ),
     );
   }
 
-  Widget _enviarForm() {
+  /* Widget _enviarForm() {
     return Column(
       children: [
         // área de filtros - seguindo padrão da tela
@@ -6974,9 +6985,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ],
     );
-  }
+  } */
 
-  Widget _entregarList() {
+  /* Widget _entregarList() {
     return Expanded(
       child: Column(
         children: [
@@ -7318,7 +7329,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
     );
-  }
+  } */
 
   Widget? _buildFotoAvatarWidget(
       Map<String, dynamic>? userData, String? userId, String userName,
@@ -10198,7 +10209,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _documentoFiltroAplicado!.isNotEmpty) {
                 _documentoController.text = _documentoFiltroAplicado!;
                 print(
-                    ' [DEBUG] Documento preenchido para novo usuário: $_documentoFiltroAplicado');
+                    ' Documento preenchido para novo usuário: $_documentoFiltroAplicado');
               }
             });
           }
@@ -10267,32 +10278,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print(' [DEBUG] Resposta completa da API: $responseData');
-        print(' [DEBUG] Chaves na resposta: ${responseData.keys.toList()}');
+        print(' Resposta completa da API: $responseData');
+        print(' Chaves na resposta: ${responseData.keys.toList()}');
 
         // Verificar se "outros" está diretamente na resposta ou dentro de "data"
         List<dynamic> outros = [];
         if (responseData.containsKey('outros')) {
           outros = responseData['outros'] as List<dynamic>? ?? [];
           print(
-              ' [DEBUG] Encontrado "outros" diretamente na resposta: ${outros.length} itens');
+              ' Encontrado "outros" diretamente na resposta: ${outros.length} itens');
         } else if (responseData.containsKey('data') &&
             responseData['data'] is Map) {
           final data = responseData['data'] as Map<String, dynamic>;
           if (data.containsKey('outros')) {
             outros = data['outros'] as List<dynamic>? ?? [];
             print(
-                ' [DEBUG] Encontrado "outros" dentro de "data": ${outros.length} itens');
+                ' Encontrado "outros" dentro de "data": ${outros.length} itens');
           }
         } else if (responseData.containsKey('data') &&
             responseData['data'] is List) {
           // Se data é uma lista, pode ser que a resposta seja diferente
-          print(' [DEBUG] "data" é uma lista, não um mapa');
+          print(' "data" é uma lista, não um mapa');
         }
 
-        print(' [DEBUG] Total de itens em "outros": ${outros.length}');
+        print(' Total de itens em "outros": ${outros.length}');
         if (outros.isNotEmpty) {
-          print(' [DEBUG] Primeiro item de "outros": ${outros.first}');
+          print(' Primeiro item de "outros": ${outros.first}');
         }
 
         // Filtrar apenas itens onde ordem > 1
@@ -10323,8 +10334,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         List<dynamic> social = [];
         if (responseData.containsKey('social')) {
           social = responseData['social'] as List<dynamic>? ?? [];
-          print(
-              ' [DEBUG] Encontrado "social" na resposta: ${social.length} itens');
+          print(' Encontrado "social" na resposta: ${social.length} itens');
         } else if (responseData.containsKey('data') &&
             responseData['data'] is Map) {
           final data = responseData['data'] as Map<String, dynamic>;
@@ -10355,8 +10365,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               '[DEBUG] Nenhum item em "social", não adicionando opçao "Espaço Social"');
         }
 
-        print(
-            ' [DEBUG] Espaá§os sociais encontrados após filtro: ${filtrados.length}');
+        print(' Espaá§os sociais encontrados após filtro: ${filtrados.length}');
         return filtrados;
       } else {
         print('Erro ao buscar espaá§os sociais: ${response.statusCode}');
@@ -10478,10 +10487,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (flgReservas.isNotEmpty) {
           // Formatar como "S,H,M,A," (sem espaá§o)
           params['tipoagendamento'] = '${flgReservas.join(',')},';
-          print(
-              'ðŸ¢ [DEBUG] Espaá§os sociais selecionados (flg_reserva): $flgReservas');
-          print(
-              'ðŸ¢ [DEBUG] tipoagendamento formatado: ${params['tipoagendamento']}');
+          print(' Espaá§os sociais selecionados (flg_reserva): $flgReservas');
+          print(' tipoagendamento formatado: ${params['tipoagendamento']}');
         }
       } else if (_espacoSocialSelecionado != null) {
         // Fallback para o filtro antigo se não houver seleçao no modal
@@ -10491,7 +10498,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           params['tipoagendamento'] = '${espacoSocialCodigo.toString()},';
         }
         print(
-            'ðŸ¢ [DEBUG] Espaço social selecionado para filtro de agendamentos: ${_espacoSocialSelecionado!['descricao']} (código: $espacoSocialCodigo)');
+            ' Espaço social selecionado para filtro de agendamentos: ${_espacoSocialSelecionado!['descricao']} (código: $espacoSocialCodigo)');
       }
 
       // Armazenar documento usado no filtro para destaque
@@ -10593,7 +10600,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _documentoFiltroAplicado!.isNotEmpty) {
                 _documentoController.text = _documentoFiltroAplicado!;
                 print(
-                    ' [DEBUG] Documento preenchido para novo usuário: $_documentoFiltroAplicado');
+                    ' Documento preenchido para novo usuário: $_documentoFiltroAplicado');
               }
             });
           }
@@ -10772,7 +10779,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 'Agendamento';
             map['reserva_dt_ini'] = resData['dt_ini'] ?? '';
             map['reserva_dt_fim'] = resData['dt_fim'] ?? '';
-            print(' [DEBUG] Convidado completo obtido: ${map['nome']}');
+            print(' Convidado completo obtido: ${map['nome']}');
             return map;
           } else {
             print(
@@ -10849,7 +10856,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
 
       if (saidaSucesso) {
-        print(' [DEBUG] Saída registrada com sucesso');
+        print(' Saída registrada com sucesso');
         if (mounted) {
           FeedbackUtils.showSuccess(
             context: context,
@@ -10931,7 +10938,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
 
       if (entradaSucesso) {
-        print(' [DEBUG] Entrada registrada com sucesso');
+        print(' Entrada registrada com sucesso');
         FeedbackUtils.showSuccess(
           context: context,
           title: 'Entrada Registrada',
@@ -11552,7 +11559,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _novaEntrada(Map<String, dynamic> dadosConvidado) async {
     print(
-        ' [DEBUG] _novaEntrada: Iniciando API Call direta (Sem Form, Sem Saída Duplicada)');
+        ' _novaEntrada: Iniciando API Call direta (Sem Form, Sem Saída Duplicada)');
 
     // Extrair IDs necessários (cópia da lógica robusta anterior)
     final reservaId = dadosConvidado['reserva_id']?.toString() ??
@@ -11593,7 +11600,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       }
       if (entradaSucesso) {
-        print(' [DEBUG] Nova entrada registrada com sucesso');
+        print(' Nova entrada registrada com sucesso');
         if (mounted) {
           FeedbackUtils.showSuccess(
             context: context,
@@ -11896,7 +11903,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _documentoFiltroAplicado!.isNotEmpty) {
                   _documentoController.text = _documentoFiltroAplicado!;
                   print(
-                      ' [DEBUG] CPF preenchido automaticamente: $_documentoFiltroAplicado');
+                      ' CPF preenchido automaticamente: $_documentoFiltroAplicado');
                 }
               });
             },
@@ -12216,7 +12223,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             return aptoId == unidadeId;
           }).toList();
           print(
-              'ðŸ¢ [DEBUG] Aplicado filtro por unidade apto_id=$unidadeId. Restaram ${convidados.length} item(s).');
+              ' Aplicado filtro por unidade apto_id=$unidadeId. Restaram ${convidados.length} item(s).');
         }
 
         print('[DEBUG] Convidados encontrados: ${convidados.length}');
@@ -12604,7 +12611,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               if (unidadeEncontrada.isNotEmpty) {
                 _selectedUnidade = unidadeEncontrada;
                 print(
-                    'ðŸ¢ [DEBUG] Unidade preenchida automaticamente: ${unidadeEncontrada['unidade_mostra'] ?? unidadeEncontrada['nome']}');
+                    ' Unidade preenchida automaticamente: ${unidadeEncontrada['unidade_mostra'] ?? unidadeEncontrada['nome']}');
               }
             }
           }
@@ -12632,7 +12639,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           });
         }
 
-        print(' [DEBUG] Cadastro AV carregado com sucesso para entrada');
+        print(' Cadastro AV carregado com sucesso para entrada');
       } else {
         print(
             'âš ï¸ [DEBUG] Nenhum cadastro encontrado para o documento AV: $documento');
@@ -12674,7 +12681,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             '[DEBUG] Buscando detalhes completos via convidadolist (Pai: $idPai, Filho: $idFilho)...');
         final completo = await _obterConvidadoCompleto(idPai, idFilho);
         if (completo != null) {
-          print(' [DEBUG] Detalhes completos obtidos: ${completo['nome']}');
+          print(' Detalhes completos obtidos: ${completo['nome']}');
           // Enriquecer os dados (mas manter o ID do pai se necessário)
           dadosCompletos.addAll(completo);
           // Garantir mapeamento de campos que podem ter nomes diferentes
@@ -12982,7 +12989,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (dados['unidade'] != null && _reservaSelecionada != null) {
         // Valor retornado pela API pode ser string "24 - Torre B" ou um id/numero
         final valorUnidade = dados['unidade'];
-        print('ðŸ¢ [DEBUG] Unidade recebida nos dados (AG): "$valorUnidade"');
+        print(' Unidade recebida nos dados (AG): "$valorUnidade"');
 
         Map<String, dynamic> unidadeEncontrada = <String, dynamic>{};
 
@@ -17299,16 +17306,16 @@ String unidadeLabelSimples(Map<String, dynamic> unidade) {
   String predioFormatado = predio;
   if (predio.length == 1 && RegExp(r'^[a-zA-Z]$').hasMatch(predio)) {
     predioFormatado = 'Torre ${predio.toUpperCase()}';
-    print('ðŸ¢ [DEBUG] Prédio formatado: "$predio" -> "$predioFormatado"');
+    print(' Prédio formatado: "$predio" -> "$predioFormatado"');
   } else if (predio.isNotEmpty && !predio.toLowerCase().startsWith('torre')) {
     // Se não comeá§a com "torre", adicionar
     predioFormatado = 'Torre $predio';
-    print('ðŸ¢ [DEBUG] Prédio formatado: "$predio" -> "$predioFormatado"');
+    print(' Prédio formatado: "$predio" -> "$predioFormatado"');
   }
 
   if (numero.isNotEmpty && predio.isNotEmpty) {
     final resultado = '$numero - $predioFormatado';
-    print('ðŸ¢ [DEBUG] Unidade formatada: $resultado');
+    print(' Unidade formatada: $resultado');
     return resultado;
   } else if (numero.isNotEmpty) {
     return numero;
@@ -17323,7 +17330,7 @@ String unidadeLabelSimples(Map<String, dynamic> unidade) {
       RegExp(r'^[a-zA-Z]$').hasMatch(unidadeMostra)) {
     unidadeMostraFormatada = 'Torre ${unidadeMostra.toUpperCase()}';
     print(
-        'ðŸ¢ [DEBUG] Unidade mostra formatada: "$unidadeMostra" -> "$unidadeMostraFormatada"');
+        ' Unidade mostra formatada: "$unidadeMostra" -> "$unidadeMostraFormatada"');
   }
 
   // Truncar texto muito longo para evitar problemas de layout em telas menores

@@ -438,26 +438,16 @@ class _LoginPageState extends State<LoginPage> {
                   'condominio_id': user['condominio_id'],
                 }),
               );
-              print(
-                  '[2FA DEBUG] condominio status: ${condominioResponse.statusCode}');
-              print('[2FA DEBUG] condominio body: ${condominioResponse.body}');
               if (condominioResponse.statusCode == 200) {
                 final condData = jsonDecode(condominioResponse.body);
                 // flg_possui_gate may be at root or inside data array
                 bool isSmartAccess = false;
                 if (condData is Map) {
-                  print(
-                      '[2FA DEBUG] condData is Map, keys: ${condData.keys.toList()}');
                   if (condData['flg_possui_gate'] == true) {
                     isSmartAccess = true;
-                    print('[2FA DEBUG] flg_possui_gate found at root = true');
                   } else if (condData['data'] is List &&
                       (condData['data'] as List).isNotEmpty) {
                     final firstItem = condData['data'][0];
-                    print(
-                        '[2FA DEBUG] data[0] keys: ${firstItem is Map ? firstItem.keys.toList() : 'not a map'}');
-                    print(
-                        '[2FA DEBUG] data[0] flg_possui_gate: ${firstItem is Map ? firstItem['flg_possui_gate'] : 'N/A'}');
                     if (firstItem is Map &&
                         firstItem['flg_possui_gate'] == true) {
                       isSmartAccess = true;
@@ -466,10 +456,6 @@ class _LoginPageState extends State<LoginPage> {
                       condData['data']['result'] is List &&
                       (condData['data']['result'] as List).isNotEmpty) {
                     final firstItem = condData['data']['result'][0];
-                    print(
-                        '[2FA DEBUG] data.result[0] keys: ${firstItem is Map ? firstItem.keys.toList() : 'not a map'}');
-                    print(
-                        '[2FA DEBUG] data.result[0] flg_possui_gate: ${firstItem is Map ? firstItem['flg_possui_gate'] : 'N/A'}');
                     if (firstItem is Map &&
                         firstItem['flg_possui_gate'] == true) {
                       isSmartAccess = true;
@@ -479,15 +465,9 @@ class _LoginPageState extends State<LoginPage> {
                   print(
                       '[2FA DEBUG] condData is NOT a Map, type: ${condData.runtimeType}');
                 }
-
-                print(
-                    '[2FA DEBUG] isSmartAccess: $isSmartAccess, kIsWeb: $kIsWeb');
                 if (isSmartAccess && kIsWeb) {
                   final cookies = html.document.cookie ?? '';
-                  print('[2FA DEBUG] cookies: "$cookies"');
-                  // TODO: replace 'SMARTACCESS_2FA' with actual cookie name
                   final hasValidCookie = cookies.contains('SMARTACCESS_2FA=');
-                  print('[2FA DEBUG] hasValidCookie: $hasValidCookie');
                   if (!hasValidCookie) {
                     requiresTwoFactor = false; // TODO: inativo temporariamente
                   }

@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/api_config.dart';
-import 'dart:js_util' as js_util;
+import 'dart:js_interop';
 import 'dart:html' as html;
 import 'widgets/bootstrap_image_widget.dart';
 import '../../core/services/crypto_utils.dart';
 import '../../core/services/permission_service.dart';
+
+@JS('_originalHref')
+external JSString? get _jsOriginalHref;
 
 class BootstrapPage extends StatefulWidget {
   final VoidCallback? onConfigured;
@@ -41,11 +44,10 @@ class _BootstrapPageState extends State<BootstrapPage> {
       // Ler URL original salva pelo JS no index.html (antes do Flutter carregar)
       String href = '';
       try {
-        //final jsHref = js_util.getProperty(html.window, '_originalHref');
-        final jsHref = js_util.getProperty(html.window, '_originalHref');
+        final jsHref = _jsOriginalHref?.toDart;
 
-        if (jsHref != null && jsHref.toString().isNotEmpty) {
-          href = jsHref.toString();
+        if (jsHref != null && jsHref.isNotEmpty) {
+          href = jsHref;
         }
       } catch (_) {}
       // Fallback: originalUrl do main.dart > sessionStorage > location.href

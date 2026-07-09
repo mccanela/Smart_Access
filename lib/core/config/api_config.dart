@@ -50,6 +50,7 @@ class ApiConfig {
         'corpoDiretivo': '$baseUrl/corpodiretivolist',
         'param': '$socialhUrl/condominioparam',
         'equipamentolist': '$gateUrl/equipamentolist',
+        'encriptcns': '$socialhUrl/encriptcns',
       },
       'ramais': {
         'lista': '$socialhUrl/ramaislist',
@@ -87,6 +88,7 @@ class ApiConfig {
         'baixaManual': '$gateUrl/baixamanual',
         'buscaentrada': '$gateUrl/buscaentrada',
         'passagemUsuarioUpd': '$gateUrl/passagemusuarioupd',
+        'ConectConIAPortaria': '$gateUrl/ConectConIAPortaria',
       },
       'encomendas': {
         'imagem': '$gateUrl/encomendaimagem',

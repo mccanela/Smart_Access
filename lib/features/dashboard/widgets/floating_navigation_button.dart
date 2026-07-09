@@ -3,18 +3,26 @@ import 'package:flutter/material.dart';
 class FloatingNavigationButton extends StatelessWidget {
   final int currentPage;
   final VoidCallback onTogglePage;
+  final int totalPages;
 
   const FloatingNavigationButton({
     super.key,
     required this.currentPage,
     required this.onTogglePage,
+    this.totalPages = 2,
   });
+
+  static const List<Color> _pageColors = [
+    Color(0xFF7C4DFF), // Página 1: Entrada/Passagens
+    Color(0xFF4CAF50), // Página 2: Unidades
+    Color(0xFF00BFA5), // Página 3: ConectCon IA
+  ];
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isTabletLayout = screenWidth <= 1366;
-    final isFirstPage = currentPage == 0;
+    final pageColor = _pageColors[currentPage % _pageColors.length];
 
     return Positioned(
       bottom: 30,
@@ -26,9 +34,7 @@ class FloatingNavigationButton extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: isTabletLayout
               ? LinearGradient(
-                  colors: isFirstPage
-                      ? [const Color(0xFF7C4DFF), const Color(0xFF5C6BC0)]
-                      : [const Color(0xFF4CAF50), const Color(0xFF66BB6A)],
+                  colors: [pageColor, pageColor.withValues(alpha: 0.7)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 )
@@ -40,11 +46,7 @@ class FloatingNavigationButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: (isTabletLayout
-                      ? (isFirstPage
-                          ? const Color(0xFF7C4DFF)
-                          : const Color(0xFF4CAF50))
-                      : Colors.grey.shade500)
+              color: (isTabletLayout ? pageColor : Colors.grey.shade500)
                   .withValues(alpha: 0.3),
               blurRadius: 12,
               offset: const Offset(0, 6),
@@ -70,37 +72,27 @@ class FloatingNavigationButton extends StatelessWidget {
                   alignment: Alignment.center,
                   children: [
                     Icon(
-                      isTabletLayout
-                          ? (isFirstPage
-                              ? Icons.arrow_forward
-                              : Icons.arrow_back)
-                          : Icons.settings,
+                      isTabletLayout ? Icons.arrow_forward : Icons.settings,
                       color: Colors.white,
                       size: 28,
                     ),
                     Positioned(
-                      top: 8,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.7),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    ),
-                    Positioned(
                       bottom: 8,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: Colors.white
-                              .withValues(alpha: isFirstPage ? 0.4 : 0.7),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: List.generate(totalPages, (index) {
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(
+                                  alpha: index == currentPage ? 0.9 : 0.4),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          );
+                        }),
                       ),
                     ),
                   ],

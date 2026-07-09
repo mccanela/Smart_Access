@@ -50,7 +50,8 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
   bool _isMouseOverGear = false; // Controle de estado do mouse na engrenagem
   bool _openSettingsToRight =
       false; // Define se o menu abre para o lado ou para cima
-
+  String _urlEncomendas =
+      'https://encomendas-6q3.pages.dev/'; // Nome do porteiro para tooltip
   //-----------------------------//
   // Método público para resetar seleção
   //-----------------------------//
@@ -87,9 +88,14 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
       _SidebarItemData(
           'Alertas', Icons.notifications_active_rounded, 'alertas'),
       _SidebarItemData('Turnos', Icons.schedule_rounded, 'turnos'),
+      _SidebarItemData('Encomenda', Icons.inventory_2_rounded, null,
+          url: _urlEncomendas),
     ];
 
     return allItems.where((item) {
+      // Itens com URL externa sempre são exibidos (links para módulos externos)
+      if (item.url != null) return true;
+
       // Tenta mapear pelo Label ou pelo modalKey
       int? id = PermissionService.getIdForFeature(item.label);
       if (id == null && item.modalKey != null) {
@@ -109,6 +115,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
     _globalSidebarState = this; // Registrar instância global
     _loadUserPhoto();
     _loadNomePorteiro();
+    _loadUrlEncomenda();
 
     // Adicionar listener para detectar quando há scroll disponível
     _scrollController.addListener(_updateScrollIndicator);
@@ -168,7 +175,67 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
     }
   }
 
+  //-----------------------------//
+  // Obtém o token criptografado do CNS (encriptcns) e concatena na URL de Encomenda
+  //-----------------------------//
+  Future<void> _loadUrlEncomenda() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final encryptedUsuarioId = prefs.getString('usuario_id') ?? '';
+      final usuarioId =
+          encryptedUsuarioId.isNotEmpty ? decryptText(encryptedUsuarioId) : '';
+
+      if (usuarioId.isEmpty) {
+        print('UsuarioId não encontrado no SharedPreferences');
+        return;
+      }
+
+      final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
+      final tokenSessao =
+          encryptedToken.isNotEmpty ? decryptText(encryptedToken) : '';
+
+      if (tokenSessao.isEmpty) {
+        print('Token de sessão não encontrado');
+        return;
+      }
+      print('Carregando token de encomenda para tokenSessao: $tokenSessao');
+      final url = Uri.parse(ApiConfig.getEndpoint('condominio', 'encriptcns'));
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $tokenSessao',
+        },
+        body: jsonEncode({'key': '1000', 'usuario_id': usuarioId}),
+      );
+
+      if (response.statusCode == 200) {
+        final dataCripto = jsonDecode(response.body);
+        final usercripto = dataCripto['data']['usucrypto'];
+        final sigla = dataCripto['data']['sigla'];
+        print('Resposta encriptcns: $usercripto');
+
+        if (usercripto != null && usercripto.toString().isNotEmpty && mounted) {
+          setState(() {
+            _urlEncomendas += sigla + '/?card=' + usercripto;
+          });
+        }
+      }
+    } catch (e) {
+      // Silenciosamente ignora erro ao carregar token de encomenda
+      print('Erro ao carregar token de encomenda na sidebar: $e');
+    }
+  }
+
   void _onItemTap(int index) {
+    final item = _items[index];
+
+    // Se o item tem URL, abrir em nova aba sem alterar seleção
+    if (item.url != null) {
+      html.window.open(item.url!, '_blank');
+      return;
+    }
+
     // Se clicar no mesmo item selecionado, deseleciona e fecha modal
     if (_selectedIndex == index) {
       setState(() => _selectedIndex = null);
@@ -180,7 +247,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
     }
 
     setState(() => _selectedIndex = index);
-    final modal = _items[index].modalKey;
+    final modal = item.modalKey;
     if (modal != null && widget.onOpenModal != null) {
       final rootContext = Navigator.of(context, rootNavigator: true).context;
       widget.onOpenModal!(modal, rootContext);
@@ -666,7 +733,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                         label: 'Suporte',
                         onTap: () {
                           html.window
-                              .open('https://conectcon.com/suporte', '_blank');
+                              .open('https://wa.me/5511934637096', '_blank');
                         },
                         iconSize: iconSize,
                         selectedColor: selectedItemColor,
@@ -818,7 +885,8 @@ class _SidebarItemData {
   final String label;
   final IconData icon;
   final String? modalKey;
-  const _SidebarItemData(this.label, this.icon, this.modalKey);
+  final String? url;
+  const _SidebarItemData(this.label, this.icon, this.modalKey, {this.url});
 }
 
 class _SidebarModernItem extends StatefulWidget {

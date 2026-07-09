@@ -142,6 +142,9 @@ class SegmentedTabBar extends StatelessWidget {
       if (l.contains('vagas')) return Symbols.garage;
       if (l.contains('encomendas')) return Symbols.package_2;
       if (l.contains('entregar')) return Symbols.hand_package;
+      if (l.contains('conectcon') || l.contains(' ia') || l == 'ia') {
+        return Icons.smart_toy_outlined;
+      }
       return Icons.help_outline;
     }).toList();
   }
