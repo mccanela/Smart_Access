@@ -20,6 +20,7 @@ import 'features/modals/turnos_modal.dart' show TurnosScreen;
 import 'features/modals/condominio_modal.dart' show CondominioPanel;
 import 'features/modals/ajustes_modal.dart' show AjustesModal;
 import 'features/modals/novidades_modal.dart' show NovidadesModal;
+import 'features/modals/noviax_modal.dart' show ConectConIAPanel;
 import 'features/modals/cameras_modal.dart'
     show showCamerasModal, isCamerasView, CamerasModal;
 import 'features/dashboard/dashboard_panels.dart'
@@ -624,6 +625,11 @@ class _ClientAppFlowState extends State<ClientAppFlow> {
         panelWidget =
             NovidadesModal(onClose: () => _closeSidePanel('novidades'));
         panelKey = 'novidades';
+        break;
+      case 'noviax':
+        panelWidget =
+            ConectConIAPanel(onClose: () => _closeSidePanel('noviax'));
+        panelKey = 'noviax';
         break;
       case 'encomendas':
         panelWidget =

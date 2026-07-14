@@ -79,17 +79,17 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
 
   List<_SidebarItemData> get _items {
     final allItems = [
-      // _SidebarItemData('Câmeras', Icons.videocam_rounded, 'cameras'), // DISABLED per user request
-      _SidebarItemData(
-          'Ocorrências', Icons.report_problem_rounded, 'ocorrencias'),
-      _SidebarItemData('Ramais', Icons.phone_in_talk_rounded, 'ramais'),
+      // _SidebarItemData('Ocorrências', Icons.report_problem_rounded, 'ocorrencias'),
       _SidebarItemData('Chaves', Icons.key_rounded, 'chaves'),
+      _SidebarItemData('Ramais', Icons.phone_in_talk_rounded, 'ramais'),
+
       _SidebarItemData('Condominio', Icons.business_rounded, 'condominio'),
       _SidebarItemData(
           'Alertas', Icons.notifications_active_rounded, 'alertas'),
       _SidebarItemData('Turnos', Icons.schedule_rounded, 'turnos'),
       _SidebarItemData('Encomenda', Icons.inventory_2_rounded, null,
           url: _urlEncomendas),
+      _SidebarItemData('Novia X', Icons.smart_toy_outlined, 'noviax'),
     ];
 
     return allItems.where((item) {
