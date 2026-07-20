@@ -50,5 +50,4 @@ void main() {
   });
 
   file.writeAsStringSync(content);
-  print('Successfully fixed encoding issues.');
 }

@@ -18,6 +18,7 @@ import '../../shared/widgets/character_counter_field.dart';
 import '../../shared/widgets/inline_feedback.dart';
 import '../../shared/widgets/inline_period_picker.dart';
 import '../../shared/widgets/inline_single_date_picker.dart';
+import '../dashboard/widgets/segmented_tab_bar.dart';
 
 // Componente RangeCalendarDialog estilo ShadCalendar
 class RangeCalendarDialog extends StatefulWidget {
@@ -651,6 +652,9 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
   bool _loadingHistorico = false;
   bool _loadingRegistro = false;
 
+  // Controle de aba ativa (0 = Nova Ocorrência, 1 = Histórico)
+  int _tabOcorrencias = 0;
+
   // Controllers
   final _localController = TextEditingController();
   final _descricaoController = TextEditingController();
@@ -768,23 +772,23 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
       ),
       child: Column(
         children: [
-          ScreenHeader(
-            icon: Icons.warning_amber_rounded,
-            title: 'Ocorrências',
-            onClose: widget.onClose,
+          SegmentedTabBar(
+            labels: const ['Ocorrência', 'Histórico'],
+            tooltips: const [
+              'Registrar nova ocorrência',
+              'Histórico de ocorrências',
+            ],
+            selected: _tabOcorrencias,
+            onChanged: (i) => setState(() => _tabOcorrencias = i),
+            color: const Color.fromARGB(204, 234, 177, 7),
           ),
+          SizedBox(height: 10),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: _buildNovaOcorrenciaPanel()),
-                  const SizedBox(width: 24),
-                  Expanded(child: _buildHistoricoPanel()),
-                ],
-              ),
-            ),
+            // Apenas aplica o Padding por fora, deixando o scroll para cada painel
+
+            child: _tabOcorrencias == 0
+                ? SingleChildScrollView(child: _buildNovaOcorrenciaPanel())
+                : _buildHistoricoPanel(), // Se esse for um ListView, ele faz o próprio scroll
           ),
         ],
       ),
@@ -793,24 +797,15 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
 
   Widget _buildNovaOcorrenciaPanel() {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
-        color: getCardColor(context),
-        border: Border.all(color: getBorderColor(context), width: 1.5),
-        borderRadius: BorderRadius.circular(16),
+        color: getFormGrisColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: getBorderColor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.warning_amber_rounded,
-                  color: AppColors.primary, size: 24),
-              const SizedBox(width: 12),
-              Text('Nova Ocorrência', style: AppTextStyles.title(context)),
-            ],
-          ),
-          const SizedBox(height: 12),
           LayoutBuilder(builder: (context, constraints) {
             return Autocomplete<Map<String, dynamic>>(
               optionsBuilder: (TextEditingValue textEditingValue) {
@@ -856,7 +851,7 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
                   focusNode: focusNode,
                   decoration: inputDecorationPadrao(
                     context,
-                    labelText: 'Unidade',
+                    labelText: 'Relatado por',
                   ).copyWith(
                     suffixIcon: textEditingController.text.isNotEmpty
                         ? IconButton(
@@ -1078,23 +1073,16 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
 
   Widget _buildHistoricoPanel() {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding:
+          const EdgeInsets.all(16.0), // Padding adicionado para respiro interno
       decoration: BoxDecoration(
-        color: getCardColor(context),
-        border: Border.all(color: getBorderColor(context), width: 1.5),
-        borderRadius: BorderRadius.circular(16),
+        color: getFormGrisColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: getBorderColor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.history, color: AppColors.primary, size: 24),
-              const SizedBox(width: 12),
-              Text('Histórico', style: AppTextStyles.title(context)),
-            ],
-          ),
-          const SizedBox(height: 20),
           LayoutBuilder(builder: (context, constraints) {
             return Autocomplete<Map<String, dynamic>>(
               optionsBuilder: (TextEditingValue textEditingValue) {
@@ -1265,16 +1253,10 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
                         itemBuilder: (context, index) {
                           final ocorrencia = _historicoOcorrencias[index];
                           return _buildOcorrenciaItem(
-                              (ocorrencia['dt_ocorrencia'] ??
-                                      ocorrencia['data'] ??
-                                      '')
-                                  .split(' ')
-                                  .first,
-                              ocorrencia['titulo_txt'] ??
-                                  ocorrencia['titulo'] ??
-                                  ocorrencia['local'] ??
-                                  '',
-                              ocorrencia['nomeusu_solicita'] ?? '');
+                            '${ocorrencia['nomeusu_intr'] ?? ''} - ${ocorrencia['unidadeusu_intr'] ?? ''} /${ocorrencia['prediousu_intr'] ?? ''} registrou em ${(ocorrencia['dt_ocorrencia'] ?? ocorrencia['data'] ?? '').split(' ').first}',
+                            ocorrencia['mensagem_txt'] ?? '',
+                            'Local: ${ocorrencia['local_txt'] ?? 'Não especificado'}',
+                          );
                         },
                       ),
           ),
@@ -1673,7 +1655,7 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
         "flg_mostra": "N",
         "fotobase64": _imagemBase64 ?? "",
         "id_terceiro": "",
-        "ip": "179.165.74.197",
+        "ip": "[IP_ADDRESS]",
         "local_txt": _localController.text.trim(),
         "mensagem_txt": _descricaoController.text.trim(),
         "nota_num": 0,
@@ -1682,7 +1664,7 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
         "statussac_id": 114,
         "subject": "",
         "titulo_txt": "Ocorrência via portaria",
-        "usuario_atende": _unidadeSelecionada!['apto_id']?.toString() ?? "",
+        "usuario_atende": _unidadeSelecionada!['usuario_id']?.toString() ?? "",
         "usuario_interacao": int.tryParse(usuarioId)?.toString() ?? "",
         "usuario_reclamado": 0,
         "usuario_solicita": int.tryParse(usuarioId)?.toString() ?? "",

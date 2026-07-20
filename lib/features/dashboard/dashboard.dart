@@ -47,7 +47,7 @@ import 'widgets/standard_autocomplete.dart';
 import 'widgets/mini_segmented.dart';
 import 'widgets/transparent_icon_group.dart';
 import 'widgets/dashboard_small_widgets.dart';
-import '../modals/noviax_modal.dart';
+import '../modals/ocorrencias_modal.dart';
 import 'services/encomenda_fetch_service.dart';
 import 'services/reference_data_service.dart';
 
@@ -971,8 +971,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _registrarEntradaAvulsoSimples(
       Map<String, dynamic> convidado, int unidadeId, String autorizante,
       {String? loadingKey}) async {
-    print(
-        '🚀 Registrando entrada AVULSO (Simples) para: ${convidado['nome'] ?? convidado['convidado_txt']}');
     setState(() {
       _loadingRegistroEntrada = true;
       if (loadingKey != null) _loadingEntradaAvulsoKeys.add(loadingKey);
@@ -1268,8 +1266,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   "foto": fotoClean,
                 };
 
-                print(
-                    '📸 Enviando foto para FotoRegistrar (ID: $targetPessoaId)');
                 await http.post(
                   urlFoto,
                   headers: {
@@ -1282,10 +1278,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
             }
           }
 
-          FeedbackUtils.showSuccess(
-              context: context,
-              title: 'Entrada Registrada',
-              message: 'Entrada registrada com sucesso!');
+          // 👇 AQUI ESTÁ A SUBSTITUIÇÃO 👇
+          setState(() {
+            _feedbackMessageEntrada = 'Entrada realizada com sucesso!';
+          });
+
+          Future.delayed(const Duration(seconds: 4), () {
+            if (mounted) {
+              setState(() {
+                _feedbackMessageEntrada = '';
+              });
+            }
+          });
+          // 👆 FIM DA SUBSTITUIÇÃO 👆
 
           // Limpar tudo e fechar
           await _limparFormularioEntrada();
@@ -1557,11 +1562,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         print(' Valor da permissá£o (valor_txt): $valorTxt');
 
         // Se o plano é Smart (sem gate), a permissá£o já foi forá§ada para false
-        // Ná£o sobrescrever nesse caso
+        // Não sobrescrever nesse caso
         if (!_enableSignalR) {
           print(
               'Plano Smart detectado. Permissá£o permanece INATIVA (ignorando condominioparam).');
-          // Ná£o alterar _permissaoAcessoPessoas, já está false
+          // Não alterar _permissaoAcessoPessoas, já está false
         } else if (valorTxt != null && valorTxt.trim().toUpperCase() == 'N') {
           // Modo somente leitura (SmartAccess com param N)
           setState(() {
@@ -2398,7 +2403,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(child: _panelConectConIA()),
+          Expanded(child: _panelOcorrencias()),
         ],
       );
     }
@@ -2425,7 +2430,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     children.add(const VerticalSeparator());
-    children.add(Expanded(child: _panelConectConIA()));
+    children.add(Expanded(child: _panelOcorrencias()));
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2718,6 +2723,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
                       ),
               ),
+              if (_feedbackMessageEntrada.trim().isNotEmpty)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(top: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green.shade600),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _feedbackMessageEntrada,
+                          style: TextStyle(
+                            color: Colors.green.shade800,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      InkWell(
+                        onTap: () =>
+                            setState(() => _feedbackMessageEntrada = ''),
+                        child: Icon(Icons.close,
+                            color: Colors.green.shade600, size: 20),
+                      ),
+                    ],
+                  ),
+                )
             ],
           ),
         ),
@@ -2726,7 +2764,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
 // Adicionei o parâmetro condominioId na função chamadora
-  Widget _panelConectConIA() {
+  Widget _panelOcorrencias() {
     return DashboardCard(
       child: FocusScope(
         canRequestFocus: true,
@@ -2738,18 +2776,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Expanded(
                 child: Column(
                   children: [
-                    SegmentedTabBar(
-                      labels: const ['NOVIA-X'],
-                      // ADICIONE A PROPRIEDADE ICONS AQUI 👇
-                      tooltips: const ['Assistente de IA ConectCon'],
-                      selected: 0,
-                      onChanged: (_) {},
-                      color: const Color(0xFF6F34C4),
-                    ),
-                    // Passando o ID para o painel e fechando o parêntese corretamente
-                    Expanded(
-                      child: ConectConIAPanel(),
-                    ),
+                    // Painel de unidades (expandido)
+                    Expanded(child: OcorrenciasScreen(onClose: () {})),
                   ],
                 ),
               ),
@@ -2807,9 +2835,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             '';
 
         // Dados básicos
-        final nome = convidado['nome'] ??
-            convidado['convidado_txt'] ??
-            'Nome não informado';
+        final nome = convidado['nome'] ?? 'Nome não informado';
         final documento =
             convidado['documento'] ?? convidado['documento_txt'] ?? '';
         final unidade =
@@ -2820,7 +2846,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 convidado['veiculo_txt'] ??
                 '')
             .toString();
+        final destino = (convidado['destino'] ?? '').toString();
 
+        final dtIni = (convidado['dt_ini'] ?? '').toString();
+        final dtFim = (convidado['dt_fim'] ?? '').toString();
+        final data = (dtIni.isNotEmpty && dtFim.isNotEmpty)
+            ? '$dtIni à $dtFim'
+            : '$dtIni$dtFim';
         // PRIORIDADE DE FOTO:
         // 1. link_foto (Se for URL oficial do banco)
         // 2. foto (Se for base64 capturado ou mapeado anteriormente)
@@ -2939,6 +2971,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                if (destino.isNotEmpty)
+                                  GestureDetector(
+                                    child: Text(
+                                      destino,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: getTextColor(context),
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        letterSpacing: -0.5,
+                                      ),
+                                    ),
+                                  ),
+                                if (data.isNotEmpty)
+                                  GestureDetector(
+                                    child: Text(
+                                      data,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: getTextColor(context),
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        letterSpacing: -0.5,
+                                      ),
+                                    ),
+                                  ),
                                 GestureDetector(
                                   onTap: () => setState(() =>
                                       _revealedPii.add('${uniqueKey}_nome')),
@@ -2950,7 +3010,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       color: getTextColor(context),
-                                      fontSize: 16,
+                                      fontSize: 14,
                                       fontWeight: FontWeight.w500,
                                       letterSpacing: -0.5,
                                     ),
@@ -2967,7 +3027,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           : _maskDocument(documento),
                                       style: TextStyle(
                                         color: getSecondaryTextColor(context),
-                                        fontSize: 12,
+                                        fontSize: 14,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
@@ -2978,7 +3038,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     style: TextStyle(
                                       color: getSecondaryTextColor(context)
                                           .withValues(alpha: 0.8),
-                                      fontSize: 12,
+                                      fontSize: 14,
                                     ),
                                   ),
                                 if (placa.isNotEmpty || modelo.isNotEmpty)
@@ -3205,17 +3265,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     await registrarEntradaSaidaGlobal(
                                         reservaId, reservaconvidadoId, false);
                                 if (success) {
-                                  FeedbackUtils.showSuccess(
-                                      context: context,
-                                      title: 'Saída Registrada',
-                                      message: 'Saída realizada com sucesso!');
+                                  // 👇 AQUI COMEÇA O NOVO PADRÃO DE FEEDBACK 👇
                                   setState(() {
+                                    _feedbackMessageEntrada =
+                                        'Saída registrada com sucesso!';
+
+                                    // Atualiza a data e hora na interface imediatamente
                                     final agora = DateTime.now();
                                     final dataFormatada =
                                         '${agora.day.toString().padLeft(2, '0')}/${agora.month.toString().padLeft(2, '0')}/${agora.year} ${agora.hour.toString().padLeft(2, '0')}:${agora.minute.toString().padLeft(2, '0')}:${agora.second.toString().padLeft(2, '0')}';
                                     convidado['saida'] = dataFormatada;
                                     convidado['dt_saida'] = dataFormatada;
                                   });
+
+                                  // Some sozinho após 4 segundos
+                                  Future.delayed(const Duration(seconds: 4),
+                                      () {
+                                    if (mounted) {
+                                      setState(() {
+                                        _feedbackMessageEntrada = '';
+                                      });
+                                    }
+                                  });
+                                  // 👆 FIM DO NOVO PADRÃO 👆
                                 }
                               },
                               color: Colors.red,
@@ -3474,7 +3546,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             context: context,
                                             title: 'Unidade não identificada',
                                             message:
-                                                'Ná£o foi possível identificar a unidade. Use Nova Entrada.');
+                                                'Não foi possível identificar a unidade. Use Nova Entrada.');
                                       }
                                     },
                               color: Colors.blue,
@@ -4998,17 +5070,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         separatorBuilder: (_, __) => const SizedBox.shrink(),
                         itemBuilder: (context, index) {
                           final passagem = _getPassagensList()[index];
+                          final destino = passagem['destino'] ?? '';
                           final nome =
                               (passagem['nome'] ?? 'Visitante').toString();
-                          final unidade = (passagem['unidade'] ??
-                                  passagem['destino'] ??
-                                  passagem['torre'] ??
-                                  '')
-                              .toString();
+                          final unidade = '';
+
                           final leitor =
                               (passagem['leitor_ds'] ?? '').toString();
                           final data =
                               (passagem['data'] ?? passagem['dt_ini'] ?? '')
+                                  .toString();
+
+                          // === 1. PEGUE A DATA DE SAÍDA AQUI ===
+                          final dtSaidaStr =
+                              (passagem['dt_saida'] ?? passagem['saida'] ?? '')
                                   .toString();
 
                           final itemKey = 'pass_${passagem['id'] ?? index}';
@@ -5017,11 +5092,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             context: context,
                             title: nome,
                             subtitle:
-                                'destino: ${unidade.isNotEmpty ? unidade : 'â€”'}',
-                            photoBase64: (passagem['link_foto'] ??
-                                    passagem['foto'])
-                                ?.toString(), // Tenta usar link_foto, senão foto
-                            // Usa Container vazio para aá§ões se não houver nenhuma, ou remove o pará¢metro
+                                'destino: ${unidade.isNotEmpty ? unidade : ' '}',
+                            photoBase64:
+                                (passagem['link_foto'] ?? passagem['foto'])
+                                    ?.toString(),
                             actions: const [],
                             extraContent: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -5039,9 +5113,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     padding: const EdgeInsets.only(top: 4.0),
                                     child: Text(
                                       'E: $data',
-                                      style: TextStyle(
+                                      style: const TextStyle(
                                         fontSize: 12,
                                         color: Colors.green,
+                                      ),
+                                    ),
+                                  ),
+                                // === 2. ADICIONE A EXIBIÇÃO DA SAÍDA AQUI ===
+                                if (dtSaidaStr.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2.0),
+                                    child: Text(
+                                      'S: $dtSaidaStr',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.red,
                                       ),
                                     ),
                                   ),
@@ -5855,29 +5941,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: LayoutBuilder(builder: (context, constraints) {
-                        return buildStandardAutocomplete<Map<String, dynamic>>(
-                          context: context,
-                          labelText: 'Unidade',
-                          items: _unidadesList,
-                          itemAsString: (option) =>
-                              unidadeLabelComMorador(option),
-                          selectedItem: _selectedUnidadeAgendamento,
-                          onSelected: (value) {
-                            setState(() {
-                              _selectedUnidadeAgendamento = value;
-                              if (_selectedUnidadeAgendamento != null &&
-                                  _selectedUnidadeAgendamento!.isNotEmpty) {
-                                _autorizanteAgendamentoController.text =
-                                    _selectedUnidadeAgendamento!['nome'] ?? '';
-                              } else {
-                                _autorizanteAgendamentoController.clear();
-                              }
-                            });
-                          },
-                          constraints: constraints,
-                        );
-                      }),
+                      child: buildStandardAutocomplete<Map<String, dynamic>>(
+                        context: context,
+                        labelText: 'Unidade',
+                        items: _unidadesList,
+                        itemAsString: (option) =>
+                            unidadeLabelComMorador(option),
+                        selectedItem: _selectedUnidadeAgendamento,
+                        onSelected: (value) {
+                          setState(() {
+                            _selectedUnidadeAgendamento = value;
+                            if (_selectedUnidadeAgendamento != null &&
+                                _selectedUnidadeAgendamento!.isNotEmpty) {
+                              _autorizanteAgendamentoController.text =
+                                  _selectedUnidadeAgendamento!['nome'] ?? '';
+                            } else {
+                              _autorizanteAgendamentoController.clear();
+                            }
+                          });
+                        },
+                        // ✅ Altura máxima controlada para evitar o erro de tela cinza
+                        constraints: const BoxConstraints(maxHeight: 250),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -6089,7 +6174,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           _abrirSidePanelConvidados(
                                             reservaId.toString(),
                                             titulo:
-                                                '${agendamento['espacopublico_ds'] ?? 'Agendamento'}\nUnidade: ${agendamento['unidade_res'] ?? 'Ná£o informado'} - Solicitante: ${agendamento['usuariosolicita_ds'] ?? 'Ná£o informado'}',
+                                                '${agendamento['espacopublico_ds'] ?? 'Agendamento'}\nUnidade: ${agendamento['unidade_res'] ?? 'Não informado'} - Solicitante: ${agendamento['usuariosolicita_ds'] ?? 'Não informado'}',
                                           );
                                         }
                                       },
@@ -6459,9 +6544,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           final vaga = _getVagasFiltradas()[index];
                           return GestureDetector(
                             onTap: () {
-                              // Só abre tela lateral se não for "Ná£o Associado"
+                              // Só abre tela lateral se não for "Não Associado"
                               final ocupante = vaga['ocupante'] ?? '';
-                              if (ocupante != 'Ná£o Associado' &&
+                              if (ocupante != 'Não Associado' &&
                                   ocupante.isNotEmpty) {
                                 // Buscar unidade associada á  vaga
                                 final aptoId = vaga['apto_id'];
@@ -6478,28 +6563,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             },
                             child: _listItem(
                               leading: Icons.local_parking,
-                              title: vaga['vaga_txt'] ?? vaga['vaga'] ?? 'Vaga',
+                              title: vaga['vaga_txt'] + ' - ' + vaga['local'] ??
+                                  '',
                               titleWidget: Row(
                                 children: [
                                   Text(
-                                    vaga['vaga_txt'] ?? vaga['vaga'] ?? 'Vaga',
+                                    vaga['vaga_txt'] + ' - ' + vaga['local'] ??
+                                        '',
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w600),
                                   ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    vaga['statusVaga_Ds'] ?? '',
-                                    style: TextStyle(
-                                      color: vaga['statusVaga_Ds'] == 'Liberada'
-                                          ? Colors.green
-                                          : Colors.orange,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
                                 ],
                               ),
-                              subtitle: vaga['ocupante'] ?? 'Ná£o informado',
+                              subtitle: vaga['ocupante'] ?? 'Não informado',
                             ),
                           );
                         },
@@ -7131,7 +7207,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final recargaEletrica = {
           'ordem': 3,
           'espacopublico_id': -1, // Dummy ID para Recarregamento
-          'espacopublico_ds': 'Recarregamento Elétrico',
+          'espacopublico_ds': 'Recarga Veículo',
           'flg_reserva': 'S',
           'icone': 'Electric',
           'cpo_data': 1,
@@ -7151,7 +7227,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         });
       }
     } catch (e) {
-      print('Erro ao buscar espaá§os sociais: $e');
       setState(() {
         _espacosSocialList = [];
         _loadingEspacosSocial = false;
@@ -7995,7 +8070,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     labelText: 'Vagas',
                     items: _vagasList,
                     itemAsString: (option) =>
-                        (option['vaga_txt'] ?? 'Vaga ${option['vaga_id']}')
+                        (option['vaga_txt'] + ' - ' + option['local'] ??
+                                'Vaga ${option['vaga_id']}')
                             .toString(),
                     selectedItem: selectedVaga,
                     onSelected: (value) {
@@ -8061,476 +8137,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   //-----------------------------//
   // Widget para filtros de entrada
   //-----------------------------//
-  Widget _buildFiltrosEntrada1x() {
-    // Se minimizado, não renderizar nada
-    if (_filtroEntradaMinimizado) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: getFormGrisColor(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: getBorderColor(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Segmented control removido - agora está no topo do painel
-
-          // Campos baseados no tipo selecionado
-          if (_tipoFiltroEntrada == 0) ...[
-            // Modo Avulso: Documento e Nome
-            Row(
-              children: [
-                Expanded(
-                  child: CharacterCounterField(
-                    controller: _filtroDocumentoEntradaController,
-                    labelText:
-                        _tipoFiltroEntrada == 0 ? 'Documento' : 'Documento',
-                    maxLength: 14,
-                    decoration: _getInputDecorationComErro(
-                      context,
-                      _tipoFiltroEntrada == 0 ? 'Documento' : 'Documento',
-                      'documento_entrada',
-                      _erroDocumentoEntrada,
-                    ),
-                    enableInteractiveSelection: true,
-                    readOnly: false,
-                    onChanged: (value) {
-                      setState(() {
-                        // Remove erro quando o usuário digita
-                        if (_erroDocumentoEntrada && value.trim().isNotEmpty) {
-                          _erroDocumentoEntrada = false;
-                        }
-                        // Se documento está preenchido, remove obrigatoriedade do nome
-                        if (value.trim().isNotEmpty &&
-                            _tipoFiltroEntrada == 0) {
-                          _erroNomeEntrada = false;
-                        }
-                      });
-                    },
-                    onSubmitted: (value) {
-                      if (value.trim().isNotEmpty) {
-                        setState(() {
-                          _erroDocumentoEntrada = false;
-                          _erroNomeEntrada = false;
-                          _filtroEntradaMinimizado = false;
-                        });
-                        _buscarEntradasFiltradas();
-                      } else {
-                        setState(() {
-                          _erroDocumentoEntrada = true;
-                        });
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: CharacterCounterField(
-                    controller: _filtroNomeEntradaController,
-                    labelText: 'Nome e Sobrenome',
-                    maxLength: 50,
-                    decoration: _getInputDecorationComErro(
-                      context,
-                      'Nome e Sobrenome',
-                      'nome',
-                      _erroNomeEntrada,
-                    ),
-                    enableInteractiveSelection: true,
-                    readOnly: false,
-                    onChanged: (value) {
-                      // Remove erro quando o usuário digita
-                      if (_erroNomeEntrada && value.trim().isNotEmpty) {
-                        setState(() {
-                          _erroNomeEntrada = false;
-                        });
-                      }
-                      if (value.trim().isNotEmpty && _tipoFiltroEntrada == 0) {
-                        setState(() {
-                          _erroDocumentoEntrada = false;
-                        });
-                      }
-                    },
-                    onSubmitted: (value) {
-                      final documento =
-                          _filtroDocumentoEntradaController.text.trim();
-                      if (documento.isNotEmpty) {
-                        setState(() {
-                          _erroDocumentoEntrada = false;
-                          _erroNomeEntrada = false;
-                          _filtroEntradaMinimizado = false;
-                        });
-                        _buscarEntradasFiltradas();
-                      } else {
-                        setState(() {
-                          _erroDocumentoEntrada = true;
-                        });
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TransparentIconGroup([
-                  IconActionData(
-                    icon: Symbols.ink_eraser,
-                    tooltip: 'Limpar filtros',
-                    color: IconColors.delete(context),
-                    onPressed: () {
-                      _filtroDocumentoEntradaController.clear();
-                      _filtroNomeEntradaController.clear();
-                      setState(() {
-                        _mostrarFormEntrada = false;
-                        _erroDocumentoEntrada = false;
-                        _erroNomeEntrada = false;
-                        _convidadosResultados.clear();
-                        _cardsExpandidos.clear();
-                      });
-                      _fecharPainelLateral();
-                    },
-                  ),
-                  // Removida condicional: botão Buscar (lupa) deve sempre aparecer antes de Novo Cadastro
-                  IconActionData(
-                    icon: Symbols.search,
-                    tooltip: 'Buscar visitante',
-                    color: IconColors.search(context),
-                    onPressed: () {
-                      final documento =
-                          _filtroDocumentoEntradaController.text.trim();
-                      final nome = _filtroNomeEntradaController.text.trim();
-
-                      if (_tipoFiltroEntrada == 0) {
-                        // Modo Avulso: pelo menos um campo deve estar preenchido
-                        if (documento.isEmpty && nome.isEmpty) {
-                          setState(() {
-                            _erroDocumentoEntrada = true;
-                            _erroNomeEntrada = true;
-                          });
-                          return;
-                        }
-                      }
-
-                      // Remove erros se campos está£o preenchidos e expande filtro
-                      setState(() {
-                        _erroDocumentoEntrada = false;
-                        _erroNomeEntrada = false;
-                        _filtroEntradaMinimizado =
-                            false; // Expandir ao buscar visitante
-                      });
-                      _buscarEntradasFiltradas();
-                    },
-                    isLoading: _loadingBuscaEntrada,
-                  ),
-                  IconActionData(
-                    icon: Symbols.person_add,
-                    tooltip: 'Novo Cadastro',
-                    color: IconColors.play(context),
-                    onPressed: () {
-                      // Limpar campos e abrir formulário de novo cadastro
-                      _filtroDocumentoEntradaController.clear();
-                      _filtroNomeEntradaController.clear();
-                      setState(() {
-                        _mostrarFormEntrada = true;
-                        _isNovoUsuario = true;
-                        _isAgendamento = false;
-                        _erroDocumentoEntrada = false;
-                        _erroNomeEntrada = false;
-                        _convidadosResultados.clear();
-                      });
-                    },
-                  ),
-                ]),
-              ],
-            ),
-          ] else ...[
-            // Modo Agendamentos: Documento, Nome, Unidade, Período
-            // Primeira linha: Documento (linha inteira para evitar truncamento)
-            Row(
-              children: [
-                Expanded(
-                  child: CharacterCounterField(
-                    controller: _filtroDocumentoEntradaController,
-                    labelText: 'Documento',
-                    maxLength: 14,
-                    decoration: _getInputDecorationComErro(
-                      context,
-                      'Documento',
-                      'documento_entrada',
-                      _erroDocumentoEntrada,
-                    ),
-                    enableInteractiveSelection: true,
-                    readOnly: false,
-                    onChanged: (value) {
-                      if (_erroDocumentoEntrada && value.trim().isNotEmpty) {
-                        setState(() {
-                          _erroDocumentoEntrada = false;
-                        });
-                      }
-                    },
-                    onSubmitted: (_) {
-                      final temData = _filtroDataInicioEntrada != null ||
-                          _filtroDataFimEntrada != null;
-
-                      if (!temData) {
-                        setState(() {
-                          _erroDataEntrada = true;
-                        });
-                        return;
-                      }
-
-                      setState(() {
-                        _erroDataEntrada = false;
-                        _erroDocumentoEntrada = false;
-                        _erroNomeEntrada = false;
-                      });
-
-                      final espacosSelecionados =
-                          _espacosSocialList.where((espaco) {
-                        final id = espaco['espacopublico_id'] as int? ?? 0;
-                        return _espacosSociaisSelecionadosFiltro[id] == true;
-                      }).toList();
-
-                      final espacosParaBusca = espacosSelecionados.isNotEmpty
-                          ? espacosSelecionados
-                          : _espacosSocialList;
-
-                      _buscarAgendamentosEntradaFiltrados(
-                          espacosSelecionados: espacosParaBusca);
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // Segunda linha: Nome e Sobrenome (linha inteira)
-            Row(
-              children: [
-                Expanded(
-                  child: CharacterCounterField(
-                    controller: _filtroNomeEntradaController,
-                    labelText: 'Nome e Sobrenome',
-                    maxLength: 50,
-                    decoration: _getInputDecoration(
-                        context, 'Nome e Sobrenome', 'nome'),
-                    enableInteractiveSelection: true,
-                    readOnly: false,
-                    onSubmitted: (_) {
-                      final temData = _filtroDataInicioEntrada != null ||
-                          _filtroDataFimEntrada != null;
-
-                      if (!temData) {
-                        setState(() {
-                          _erroDataEntrada = true;
-                        });
-                        return;
-                      }
-
-                      setState(() {
-                        _erroDataEntrada = false;
-                        _erroDocumentoEntrada = false;
-                        _erroNomeEntrada = false;
-                      });
-
-                      final espacosSelecionados =
-                          _espacosSocialList.where((espaco) {
-                        final id = espaco['espacopublico_id'] as int? ?? 0;
-                        return _espacosSociaisSelecionadosFiltro[id] == true;
-                      }).toList();
-
-                      final espacosParaBusca = espacosSelecionados.isNotEmpty
-                          ? espacosSelecionados
-                          : _espacosSocialList;
-
-                      _buscarAgendamentosEntradaFiltrados(
-                          espacosSelecionados: espacosParaBusca);
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // Terceira linha: Unidade
-            Row(
-              children: [
-                Expanded(
-                  child: LayoutBuilder(builder: (context, constraints) {
-                    return buildStandardAutocomplete<Map<String, dynamic>>(
-                      key: ValueKey(_unidadeFiltroAplicada),
-                      context: context,
-                      labelText: 'Unidade',
-                      items: _unidadesList,
-                      itemAsString: (option) => unidadeLabelComMorador(option),
-                      selectedItem: _unidadeFiltroSelecionada,
-                      onSelected: (value) {
-                        setState(() {
-                          _unidadeFiltroSelecionada = value;
-                          _unidadeFiltroAplicada =
-                              value != null ? value['apto_id'] : null;
-                        });
-                      },
-                      constraints: constraints,
-                    );
-                  }),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // Terceira linha: Período (ocupando largura total)
-            _buildPeriodFilter(
-              context: context,
-              startDate: _filtroDataInicioEntrada,
-              endDate: _filtroDataFimEntrada,
-              hintText: 'período *',
-              temErro: _erroDataEntrada,
-              onStartDateChanged: (date) {
-                setState(() {
-                  _filtroDataInicioEntrada = date;
-                  if (date != null) {
-                    _erroDataEntrada = false;
-                  }
-                });
-              },
-              onEndDateChanged: (date) {
-                setState(() {
-                  _filtroDataFimEntrada = date;
-                  if (date != null) {
-                    _erroDataEntrada = false;
-                  }
-                });
-              },
-            ),
-            const SizedBox(height: 12),
-
-            // Quarta linha: Botões de Açao
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TransparentIconGroup([
-                  IconActionData(
-                    icon: Symbols.ink_eraser,
-                    tooltip: 'Limpar filtros',
-                    color: IconColors.delete(context),
-                    onPressed: () {
-                      _filtroDocumentoEntradaController.clear();
-                      _filtroUnidadeEntradaController.clear();
-                      _filtroNomeEntradaController.clear();
-                      setState(() {
-                        _filtroDataEntrada = null;
-                        _filtroDataInicioEntrada = null;
-                        _filtroDataFimEntrada = null;
-                        _unidadeFiltroSelecionada = null;
-                        _unidadeFiltroAplicada = null;
-                        _espacoSocialSelecionado = null;
-                        _mostrarFormEntrada = false;
-                        _erroDocumentoEntrada = false;
-                        _erroNomeEntrada = false;
-                        _erroDataEntrada = false;
-                        _convidadosResultados.clear();
-                        _cardsExpandidos.clear();
-                      });
-                      _fecharPainelLateral();
-                    },
-                    isOpaque: false,
-                  ),
-                  IconActionData(
-                    icon: Symbols.search,
-                    tooltip: 'Pesquisar convidados',
-                    color: IconColors.search(context),
-                    onPressed: () {
-                      if (_filtroEntradaMinimizado) {
-                        setState(() {
-                          _filtroEntradaMinimizado = false;
-                        });
-                      } else {
-                        // Se ná£o minimizado, realiza a busca com os filtros atuais
-                        final espacosSelecionados =
-                            _espacosSocialList.where((espaco) {
-                          final id = espaco['espacopublico_id'] as int? ?? 0;
-                          return _espacosSociaisSelecionadosFiltro[id] == true;
-                        }).toList();
-                        final espacosParaBusca = espacosSelecionados.isNotEmpty
-                            ? espacosSelecionados
-                            : _espacosSocialList;
-                        _buscarAgendamentosEntradaFiltrados(
-                            espacosSelecionados: espacosParaBusca);
-                      }
-                    },
-                    isLoading: _loadingBuscaAgendamentos,
-                  ),
-                  // Botá£o Filtros (antiga seta)
-                  IconActionData(
-                    icon: _agendamentoTiposFiltroExpandido
-                        ? Symbols.assignment_turned_in
-                        : Symbols.assignment,
-                    tooltip: 'Tipos de Agendamento',
-                    onPressed: () {
-                      setState(() {
-                        _agendamentoTiposFiltroExpandido =
-                            !_agendamentoTiposFiltroExpandido;
-                      });
-                    },
-                    color: _agendamentoTiposFiltroExpandido
-                        ? const Color(0xFF00C853)
-                        : (isDarkMode(context) ? Colors.white : Colors.black87),
-                  ),
-                ]),
-              ],
-            ),
-            // 2. Painel de Filtros de Agendamento Expandido (com ANIMAá‡ão)
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              transitionBuilder: (Widget child, Animation<double> animation) {
-                return SizeTransition(
-                  sizeFactor: animation,
-                  axisAlignment: -1.0,
-                  child: FadeTransition(
-                    opacity: animation,
-                    child: child,
-                  ),
-                );
-              },
-              child: _agendamentoTiposFiltroExpandido
-                  ? Column(
-                      key: const ValueKey('expanded_filter'),
-                      children: [
-                        const SizedBox(height: 12),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: isDarkMode(context)
-                                ? const Color(0xFF374151)
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(40),
-                            border: Border.all(
-                                color: getBorderColor(context)
-                                    .withValues(alpha: 0.2)),
-                          ),
-                          child: _buildCardsTiposAgendamentoContent(
-                              transparent: true, isFullWidth: false),
-                        ),
-                      ],
-                    )
-                  : const SizedBox.shrink(key: ValueKey('collapsed_filter')),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   Widget _buildFiltrosEntrada() {
     // Se minimizado, não renderizar nada
     if (_filtroEntradaMinimizado) {
@@ -8717,6 +8323,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _erroDocumentoEntrada = false;
                         _erroNomeEntrada = false;
                         _convidadosResultados.clear();
+                        // LIMPEZA DO BOX DE FOTO AQUI 👇
+                        _fotoEntrada = null;
+                        _fotoDocumento = null;
+                        _fotoRostoEntrada = null;
+                        _fotoDocumentoEntrada = null;
+                        _fotoBase64 = null;
+                        _fotoDocumentoBase64 = null;
                       });
                     },
                   ),
@@ -8834,24 +8447,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Row(
               children: [
                 Expanded(
-                  child: LayoutBuilder(builder: (context, constraints) {
-                    return buildStandardAutocomplete<Map<String, dynamic>>(
-                      key: ValueKey(_unidadeFiltroAplicada),
-                      context: context,
-                      labelText: 'Unidade',
-                      items: _unidadesList,
-                      itemAsString: (option) => unidadeLabelComMorador(option),
-                      selectedItem: _unidadeFiltroSelecionada,
-                      onSelected: (value) {
-                        setState(() {
-                          _unidadeFiltroSelecionada = value;
-                          _unidadeFiltroAplicada =
-                              value != null ? value['apto_id'] : null;
-                        });
-                      },
-                      constraints: constraints,
-                    );
-                  }),
+                  child: buildStandardAutocomplete<Map<String, dynamic>>(
+                    key: ValueKey(_unidadeFiltroAplicada),
+                    context: context,
+                    labelText: 'Unidade',
+                    items: _unidadesList,
+                    itemAsString: (option) => unidadeLabelComMorador(option),
+                    selectedItem: _unidadeFiltroSelecionada,
+                    onSelected: (value) {
+                      setState(() {
+                        _unidadeFiltroSelecionada = value;
+                        _unidadeFiltroAplicada =
+                            value != null ? value['apto_id'] : null;
+                      });
+                    },
+                    constraints: const BoxConstraints(maxHeight: 250),
+                  ),
                 ),
               ],
             ),
@@ -9180,7 +8791,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               : '';
                         });
                       },
-                      constraints: constraints,
+                      constraints: const BoxConstraints(maxHeight: 250),
                     );
                   }),
                 ),
@@ -9261,7 +8872,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // Funçao para filtrar vagas por ID específico
   List<Map<String, dynamic>> _getVagasFiltradas() {
-    // Requisito: Ná£o listar sem pesquisar
+    // Requisito: Não listar sem pesquisar
     if (_filtroVagasSelecionado == null || _filtroVagasSelecionado!.isEmpty) {
       return [];
     }
@@ -9340,7 +8951,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final filtroUnidade = _filtroUnidadeController.text.trim();
     final filtroNome = _filtroNomeUnidadeController.text.trim();
 
-    // Requisito: Ná£o listar sem pesquisar
+    // Requisito: Não listar sem pesquisar
     if (filtroUnidade.isEmpty && filtroNome.isEmpty) {
       return [];
     }
@@ -9451,7 +9062,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           : '';
 
       final url =
-          Uri.parse('https://gate.conectcon.net.br/pt-br/passagemhistorico');
+          Uri.parse(ApiConfig.getEndpoint('dashboard', 'historicoPassagem'));
 
       // Usar data atual por padrão, ou filtro se selecionado
       final hoje = DateTime.now();
@@ -9467,7 +9078,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             '${dataIni.year}-${dataIni.month.toString().padLeft(2, '0')}-${dataIni.day.toString().padLeft(2, '0')} 00:00:00', // Data atual ou filtro (00:00:00)
         "nome": _filtroNomeHistoricoController.text.trim(),
         "pessoaveiculo": _filtroDocumentoHistoricoController.text.trim(),
-        "placa": _filtroPlacaHistoricoController.text.trim(),
+        "placa": _filtroPlacaHistoricoController.text.trim()
       };
 
       final response = await http.post(
@@ -9607,6 +9218,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         "nome": _filtroNomeSaidasController.text.trim(),
         "pessoaveiculo": _filtroDocumentoSaidasController.text.trim(),
         "placa": _filtroPlacaSaidasController.text.trim(),
+        "naosairam": true
       };
 
       final response = await http.post(
@@ -9729,7 +9341,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'documento': documentoFiltro,
         'dt_ini': null,
         'dt_fim': null,
-        'tipoagendamento': 'S,H,M,A,',
+        'tipoagendamento': 'S,H,M,A,K,',
       };
 
       // Armazenar documento usado no filtro para destaque
@@ -9754,8 +9366,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         List<Map<String, dynamic>> resultados =
             List<Map<String, dynamic>>.from(responseData['data'] ?? []);
 
-        if (resultados.isNotEmpty) {}
-
         setState(() {
           _resultadosBuscaEntrada = resultados;
           _loadingBuscaEntrada = false;
@@ -9766,11 +9376,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         // Para múltiplos resultados, agrupar por reserva_id e buscar convidadolist para cada reserva
         if (resultados.isNotEmpty) {
-          print(
-              '[DEBUG] Agrupando ${resultados.length} resultado(s) por reserva_id');
           await _processarResultadosBuscaEntrada(resultados);
         } else {
           // Verificar se foram aplicados filtros de unidade e/ou data/período
+// Verificar se foram aplicados filtros
           final temFiltroUnidade =
               _unidadeFiltroAplicada != null && _unidadeFiltroAplicada! > 0;
           final temFiltroData = _filtroDataEntrada != null;
@@ -9778,26 +9387,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _filtroDataInicioEntrada != null || _filtroDataFimEntrada != null;
           final temFiltroDocumento = _documentoFiltroAplicado != null &&
               _documentoFiltroAplicado!.isNotEmpty;
+          final temFiltroNome =
+              _filtroNomeEntradaController.text.trim().isNotEmpty;
 
-          print('[DEBUG] Verificando filtros aplicados:');
-          print(
-              '[DEBUG] temFiltroUnidade: $temFiltroUnidade (unidade: $_unidadeFiltroAplicada)');
-          print(
-              '[DEBUG] temFiltroData: $temFiltroData (data: $_filtroDataEntrada)');
-          print(
-              '[DEBUG] temFiltroPeriodo: $temFiltroPeriodo (início: $_filtroDataInicioEntrada, fim: $_filtroDataFimEntrada)');
-          print(
-              '[DEBUG] temFiltroDocumento: $temFiltroDocumento (documento: $_documentoFiltroAplicado)');
-
-          // Se aplicou filtros de unidade e/ou data/período (com ou sem documento), mostrar mensagem "visitante não encontrado"
-          if (temFiltroUnidade || temFiltroData || temFiltroPeriodo) {
-            print(
-                '[DEBUG] Filtros aplicados mas nenhum visitante encontrado - mostrando mensagem');
+          // Se aplicou QUALQUER filtro, mostrar mensagem de "não encontrado" em vez de forçar o cadastro
+          if (temFiltroUnidade ||
+              temFiltroData ||
+              temFiltroPeriodo ||
+              temFiltroDocumento ||
+              temFiltroNome) {
             _mostrarMensagemAgendamentoNaoEncontrado();
           } else {
-            // Quando não há filtros específicos (apenas busca geral), abrir diretamente o formulário vazio para novo usuário
-            print(
-                '[DEBUG] Nenhum filtro específico aplicado - abrindo formulário vazio para novo usuário');
             // Limpar formulário para novo cadastro
             _limparFormulario();
             // Marcar que é novo usuário e preencher documento pesquisado
@@ -10032,7 +9632,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // Buscar agendamentos filtrados usando a mesma API buscaentrada com período
   Future<void> _buscarAgendamentosEntradaFiltrados(
       {List<Map<String, dynamic>>? espacosSelecionados}) async {
-    print('ðŸ“… [DEBUG] _buscarAgendamentosEntradaFiltrados() chamada');
+    print('[DEBUG] _buscarAgendamentosEntradaFiltrados() chamada');
 
     setState(() {
       _loadingBuscaAgendamentos = true;
@@ -10042,25 +9642,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final prefs = await SharedPreferences.getInstance();
       final encryptedCondominioId = prefs.getString('condominio_id') ?? '';
       final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
-      print('ðŸ“… [DEBUG] encryptedCondominioId: $encryptedCondominioId');
-      print('ðŸ“… [DEBUG] encryptedToken: $encryptedToken');
-
       final condominioId = (encryptedCondominioId.isNotEmpty)
           ? decryptText(encryptedCondominioId)
           : '';
       final tokenSessao =
           (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-      print('ðŸ“… [DEBUG] condominioId: $condominioId');
-      print(
-          'ðŸ“… [DEBUG] tokenSessao: ${tokenSessao.isNotEmpty ? "presente" : "ausente"}');
-
       if (condominioId.isEmpty) {
-        print('ðŸ“… [DEBUG] condominioId vazio, cancelando busca');
         return;
       }
 
       if (tokenSessao.isEmpty) {
-        print('ðŸ“… [DEBUG] tokenSessao vazio, cancelando busca');
         return;
       }
 
@@ -10069,9 +9660,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final DateTime dataInicio = _filtroDataInicioEntrada ?? DateTime.now();
       final DateTime dataFim = _filtroDataFimEntrada ?? DateTime.now();
       final documentoFiltro = _filtroDocumentoEntradaController.text.trim();
-      print(
-          'ðŸ“… [DEBUG] Período usado: ${dataInicio.toIso8601String()}Z até ${dataFim.toIso8601String()}Z');
-
       final Map<String, dynamic> params = {
         'condominio_id': int.tryParse(condominioId) ?? 0,
         'apto_id': _unidadeFiltroAplicada ??
@@ -10080,8 +9668,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'documento': documentoFiltro,
         'dt_ini': '${dataInicio.toIso8601String()}Z',
         'dt_fim': '${dataFim.toIso8601String()}Z',
-        'tipo':
-            'AG', // Forá§ar busca apenas de agendamentos (AG), não visitantes (AV)
+        'tipo': 'AG',
       };
 
       // Adicionar espaá§os sociais selecionados no modal
@@ -10095,8 +9682,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (flgReservas.isNotEmpty) {
           // Formatar como "S,H,M,A," (sem espaá§o)
           params['tipoagendamento'] = '${flgReservas.join(',')},';
-          print(' Espaá§os sociais selecionados (flg_reserva): $flgReservas');
-          print(' tipoagendamento formatado: ${params['tipoagendamento']}');
         }
       } else if (_espacoSocialSelecionado != null) {
         // Fallback para o filtro antigo se não houver seleçao no modal
@@ -10105,20 +9690,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (espacoSocialCodigo != null) {
           params['tipoagendamento'] = '${espacoSocialCodigo.toString()},';
         }
-        print(
-            ' Espaço social selecionado para filtro de agendamentos: ${_espacoSocialSelecionado!['descricao']} (código: $espacoSocialCodigo)');
       }
 
       // Armazenar documento usado no filtro para destaque
       _documentoFiltroAplicado =
           documentoFiltro.isNotEmpty ? documentoFiltro : null;
 
-      print('ðŸ“… [DEBUG] Pará¢metros da busca de agendamento: $params');
-      print('ðŸ“… [DEBUG] apto_id usado: ${_unidadeFiltroAplicada ?? 0}');
-
       // Sempre usar buscaentrada para encontrar pai/filho, depois convidadolist para montar lista
       final url = Uri.parse(ApiConfig.getEndpoint('dashboard', 'buscaentrada'));
-      print('ðŸ“… [DEBUG] URL da API: $url');
       final response = await http.post(
         url,
         headers: {
@@ -10128,9 +9707,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         body: json.encode(params),
       );
 
-      print('ðŸ“… [DEBUG] Status da resposta: ${response.statusCode}');
-      print('ðŸ“… [DEBUG] Corpo da resposta: ${response.body}');
-
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
 
@@ -10138,19 +9714,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         List<Map<String, dynamic>> resultados =
             List<Map<String, dynamic>>.from(responseData['data'] ?? []);
 
-        print('ðŸ“… [DEBUG] Resultados encontrados: ${resultados.length}');
-        if (resultados.isNotEmpty) {
-          print('ðŸ“… [DEBUG] Primeiro resultado completo: ${resultados[0]}');
-          print(
-              'ðŸ“… [DEBUG] Campos disponíveis no primeiro resultado: ${resultados[0].keys.toList()}');
-        }
-
         // Filtrar apenas agendamentos (AG) antes de processar no modo Agendamento
         final resultadosAgendamentos =
             resultados.where((r) => r['tipo']?.toString() == 'AG').toList();
-        print(
-            'ðŸ“… [DEBUG] Resultados filtrados para agendamentos: ${resultadosAgendamentos.length} de ${resultados.length}');
-
         setState(() {
           _resultadosBuscaEntrada =
               resultadosAgendamentos; // Armazenar apenas agendamentos
@@ -10159,36 +9725,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         // Para múltiplos resultados, agrupar por reserva_id e buscar convidadolist para cada reserva
         if (resultadosAgendamentos.isNotEmpty) {
-          print(
-              'ðŸ“… [DEBUG] Agrupando ${resultadosAgendamentos.length} agendamento(s) por reserva_id');
           await _processarResultadosBuscaEntrada(resultadosAgendamentos,
               apenasAgendamentos: true);
         } else {
           // Verificar se foram aplicados filtros de unidade e/ou período
+// Verificar se foram aplicados filtros
           final temFiltroUnidade =
               _unidadeFiltroAplicada != null && _unidadeFiltroAplicada! > 0;
+          final temFiltroData = _filtroDataEntrada != null;
           final temFiltroPeriodo =
               _filtroDataInicioEntrada != null || _filtroDataFimEntrada != null;
           final temFiltroDocumento = _documentoFiltroAplicado != null &&
               _documentoFiltroAplicado!.isNotEmpty;
-
-          print('ðŸ“… [DEBUG] Verificando filtros aplicados:');
-          print(
-              'ðŸ“… [DEBUG] temFiltroUnidade: $temFiltroUnidade (unidade: $_unidadeFiltroAplicada)');
-          print(
-              'ðŸ“… [DEBUG] temFiltroPeriodo: $temFiltroPeriodo (início: $_filtroDataInicioEntrada, fim: $_filtroDataFimEntrada)');
-          print(
-              'ðŸ“… [DEBUG] temFiltroDocumento: $temFiltroDocumento (documento: $_documentoFiltroAplicado)');
-
-          // Se aplicou filtros de unidade e/ou período (com ou sem documento), mostrar mensagem "agendamento não encontrado"
-          if (temFiltroUnidade || temFiltroPeriodo) {
-            print(
-                'ðŸ“… [DEBUG] Filtros aplicados mas nenhum agendamento encontrado - mostrando mensagem');
+          final temFiltroNome =
+              _filtroNomeEntradaController.text.trim().isNotEmpty;
+          // Se aplicou QUALQUER filtro, mostrar mensagem de "não encontrado" em vez de forçar o cadastro
+          if (temFiltroUnidade ||
+              temFiltroData ||
+              temFiltroPeriodo ||
+              temFiltroDocumento ||
+              temFiltroNome) {
             _mostrarMensagemAgendamentoNaoEncontrado();
           } else {
             // Quando não há filtros específicos (apenas busca geral), abrir diretamente o formulário vazio para novo usuário
-            print(
-                'ðŸ“… [DEBUG] Nenhum filtro específico aplicado - abrindo formulário vazio para novo usuário');
             // Limpar formulário para novo cadastro
             _limparFormulario();
             // Marcar que é novo usuário e preencher documento pesquisado
@@ -10207,14 +9766,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               if (_documentoFiltroAplicado != null &&
                   _documentoFiltroAplicado!.isNotEmpty) {
                 _documentoController.text = _documentoFiltroAplicado!;
-                print(
-                    ' Documento preenchido para novo usuário: $_documentoFiltroAplicado');
               }
             });
           }
         }
       } else {
-        print('Erro na busca de agendamentos: ${response.statusCode}');
         setState(() {
           _resultadosBuscaEntrada = [];
           _mostrarFormEntrada = true;
@@ -10247,16 +9803,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _processarResultadosBuscaEntrada(
       List<Map<String, dynamic>> resultados,
       {bool apenasAgendamentos = false}) async {
-    print(
-        '[DEBUG] _processarResultadosBuscaEntrada() chamada com ${resultados.length} resultados (apenasAgendamentos: $apenasAgendamentos)');
-
     // Mapear resultados da buscaentrada diretamente para o formato esperado pelos cards
     final List<Map<String, dynamic>> listaFormatada = resultados.map((res) {
       final tipoBusca = res['tipo']?.toString() ?? 'AG'; // AG ou AV
       final idFilho = int.tryParse(res['id_filho']?.toString() ?? '0') ?? 0;
 
       final map = Map<String, dynamic>.from(res);
-
+      print('_processarResultadosBuscaEntrada entreou');
       // Determinar o tipo do card
       if (tipoBusca == 'AV') {
         map['tipo'] = 'AV';
@@ -10267,7 +9820,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       // Compatibilidade de campos (mapeando campos do buscaentrada para os nomes usados no card)
-      map['convidado_txt'] = res['nome'] ?? '';
+      map['origem'] = res['origem'] ?? '';
+
+      print(map['origem']);
+      map['nome'] = res['nome'] ?? '';
+
       map['documento_txt'] = res['documento'] ?? '';
       map['reserva_tipo_txt'] = res['destino'] ?? 'Agendamento';
       map['reserva_dt_ini'] = res['dt_ini'] ?? '';
@@ -10280,8 +9837,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           res['apto_id'] ?? res['unidade_id']; // buscaentrada retorna 'apto_id'
       map['reservaconvidado_id'] = res['id_filho'];
       map['reserva_id'] = res['id_pai'];
-      map['link_foto'] = res[
-          'link_foto']; // Preservar explicitamente o link da foto de buscaentrada
+      map['link_foto'] = res['link_foto'];
+      // Preservar explicitamente o link da foto de buscaentrada
       map['foto'] = (res['link_foto'] != null &&
               res['link_foto'].toString().isNotEmpty &&
               res['link_foto'].toString() != 'null')
@@ -10324,9 +9881,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _mostrarFormEntrada = false;
       }
     });
-
-    print(
-        'Exibindo total de ${listaFormatada.length} resultados do buscaentrada inline');
   }
 
   // Busca detalhes completos de um convidado específico via convidadolist
@@ -10538,7 +10092,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     try {
-      print('ðŸŸ¢ [DEBUG] Registrando entrada (E)...');
       final entradaSucesso = await registrarEntradaSaidaGlobal(
         reservaId,
         reservaconvidadoId,
@@ -11369,7 +10922,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
               // Mensagem
               Text(
-                'Ops! Ná£o encontramos nenhum agendamento para os filtros aplicados.',
+                'Ops! Não encontramos nenhum agendamento para os filtros aplicados.',
                 style: TextStyle(
                   fontSize: 16,
                   color: Colors.grey.shade700,
@@ -11482,7 +11035,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 20),
           Text(
-            'Ná£o foi encontrado nenhum usuário com os critérios informados.',
+            'Não foi encontrado nenhum usuário com os critérios informados.',
             style: TextStyle(
               fontSize: 12,
               color: getTextColor(context),
@@ -11663,9 +11216,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             'Abrindo painel lateral com ${convidados.length} resultados de convidadolist');
 
         final painel = _ResultadosBuscaEntradaPanel(
-          resultados: [], // Ná£o usar resultados de buscaentrada
+          resultados: [], // Não usar resultados de buscaentrada
           convidadosReserva: convidados, // Usar resultados de convidadolist
-          reservaSelecionada: null, // Ná£o há reserva específica
+          reservaSelecionada: null, // Não há reserva específica
           documentoFiltroAplicado: _documentoFiltroAplicado,
           onSelecionar: _selecionarEntrada,
           onSelecionarConvidado: _selecionarConvidadoReserva,
@@ -11683,7 +11236,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
               _reservaSelecionada = null;
               _convidadosReserva = [];
-              // Ná£o limpar _selectedConvidadoId se o formulário está aberto
+              // Não limpar _selectedConvidadoId se o formulário está aberto
               if (!formJaAbertoEPreenchido) {
                 _selectedConvidadoId = null;
               }
@@ -11774,7 +11327,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
 
         // Mostrar TODOS os convidados (incluindo os que já deram entrada)
-        // Ná£o filtrar mais - mostrar todos para permitir ver histórico de entradas
+        // Não filtrar mais - mostrar todos para permitir ver histórico de entradas
 
         print(
             '[DEBUG] _buscarConvidadosReserva: mostrarTodos=$mostrarTodos, _filtrarReservaconvidadoId=$_filtrarReservaconvidadoId, convidados.length=${convidados.length}');
@@ -11903,7 +11456,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
               _reservaSelecionada = null;
               _convidadosReserva = [];
-              // Ná£o limpar _selectedConvidadoId se o formulário está aberto
+              // Não limpar _selectedConvidadoId se o formulário está aberto
               if (!formJaAbertoEPreenchido) {
                 _selectedConvidadoId = null;
               }
@@ -12024,7 +11577,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     setState(() {
       _mostrarFormEntrada = true;
-      _isNovoUsuario = false; // Ná£o é novo usuário
+      _isNovoUsuario = false; // Não é novo usuário
       // Só marcar como agendamento se for tipo AG e estiver no modo Avulso
       // AV sempre é tratado como entrada avulso, nunca como agendamento
       _isAgendamento = isAgendamento && _tipoFiltroEntrada == 0 && !isAvulso;
@@ -12420,7 +11973,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (reservaconvidadoId == null || reservaconvidadoId.isEmpty) {
       print(
-          'âš ï¸ Ná£o foi possível carregar foto: ID do convidado não encontrado');
+          'âš ï¸ Não foi possível carregar foto: ID do convidado não encontrado');
       return;
     }
 
@@ -12766,7 +12319,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _removerConvidadoAposEntrada(String reservaConvidadoId) {
-    // Ná£o remover localmente - a API convidadolist já retorna apenas convites pendentes
+    // Não remover localmente - a API convidadolist já retorna apenas convites pendentes
     // (onde "entrada": "" está vazio)
     print(
         'Convidado $reservaConvidadoId removido da lista via API convidadolist');
@@ -12799,7 +12352,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final dataFim = _filtroDataFimSaidas ?? hoje;
 
         final url =
-            Uri.parse('https://gate.conectcon.net.br/pt-br/passagemhistorico');
+            Uri.parse(ApiConfig.getEndpoint('dashboard', 'historicoPassagem'));
 
         final payload = {
           "apto_id": 0,
@@ -12856,7 +12409,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     // Para passagens (não saídas), usar apenas dados do SignalR
-    // Ná£o fazer chamada de API - os dados vêm do SignalR
+    // Não fazer chamada de API - os dados vêm do SignalR
     setState(() {
       _loadingPassagens = false; // SignalR já carregou os dados
     });
@@ -13185,6 +12738,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _unidadeAgendamento = null; // Resetar unidade do agendamento
       _filtrarReservaconvidadoId = null; // Limpar filtro por convidado (filho)
       _mostrarErrosVisuais = false; // Resetar erros visuais
+      // LIMPEZA DO BOX DE FOTO AQUI
+      _fotoEntrada = null;
+      _fotoDocumento = null;
+      _fotoRostoEntrada = null;
+      _fotoDocumentoEntrada = null;
+      _fotoBase64 = null;
+      _fotoDocumentoBase64 = null;
+      _fotoEncomenda = null; // Se aplicável
     });
 
     // Forá§ar refresh da UI e mostrar confirmaçao
@@ -13230,6 +12791,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // AV (Avulso): Registrar entrada/movimento (já inclui atualizaçao de cadastro se necessário)
         await _registrarEntradaAvulso();
       }
+// Após a API retornar sucesso no salvamento do formulário:
+      setState(() {
+        _feedbackMessageEntrada = 'Entrada realizada com sucesso!';
+        _mostrarFormEntrada = false; // Fecha o formulário
+      });
+
+      Future.delayed(const Duration(seconds: 4), () {
+        if (mounted) {
+          setState(() {
+            _feedbackMessageEntrada = '';
+          });
+        }
+      });
     } catch (e) {
       print('Erro ao salvar: $e');
       FeedbackUtils.showError(
@@ -14965,20 +14539,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
         body: jsonEncode(payload),
       );
 
+      // === SOLUÇÃO 1: Adicione esta linha aqui ===
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
         // Fechar card expandido e remover loading
         final uniqueKey = 'saida_$passagemId';
         setState(() {
           _cardsExpandidos.remove(uniqueKey);
           _loadingSaidas.remove(passagemId);
+
+          // === SOLUÇÃO: Injetar a saída nas listas locais imediatamente ===
+          for (var p in _passagens) {
+            if ((p['id']?.toString() ?? p['passagem_id']?.toString()) ==
+                passagemId) {
+              p['dt_saida'] = dtSaida;
+            }
+          }
+          for (var p in _historicoFiltrado) {
+            if ((p['id']?.toString() ?? p['passagem_id']?.toString()) ==
+                passagemId) {
+              p['dt_saida'] = dtSaida;
+            }
+          }
         });
 
-        // Mostrar feedback de sucesso
-        FeedbackUtils.showSuccess(
-          context: context,
-          title: 'Saída Registrada',
-          message: 'Saída registrada com sucesso!',
-        );
+        // ... resto do seu código (FeedbackUtils.showSuccess, etc)
 
         // Recarregar lista de saídas para garantir atualização
         await _buscarSaidasFiltradas();
@@ -14999,6 +14585,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       }
     } catch (e) {
+      // === SOLUÇÃO 1: E adicione esta linha aqui também ===
+      if (!mounted) return;
+
       // Remover loading state
       setState(() {
         _loadingSaidas.remove(passagemId);
@@ -15006,7 +14595,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       FeedbackUtils.showError(
         context: context,
-        title: 'Erro de Conexá£o',
+        title: 'Erro de Conexão',
         message: 'Erro ao conectar',
         errorDetails: e.toString(),
       );
@@ -15301,7 +14890,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _voltarPainelAnterior() {
     if (_painelAnterior != null) {
       _abrirPainelLateral(_painelAnterior!);
-      // Ná£o limpa _painelAnterior aqui, pois pode ser usado novamente
+      // Não limpa _painelAnterior aqui, pois pode ser usado novamente
       // _painelAnterior será sobrescrito quando um novo painel for aberto
     } else {
       // Se não há painel anterior, simplesmente fecha o painel atual
@@ -16989,7 +16578,7 @@ Uint8List? _safeBase64Decode(String? base64String) {
           decoded[0] == 0x47 && decoded[1] == 0x49 && decoded[2] == 0x46;
 
       if (!isJPEG && !isPNG && !isGIF) {
-        // Ná£o é um formato de imagem reconhecido
+        // Não é um formato de imagem reconhecido
         return null;
       }
     }

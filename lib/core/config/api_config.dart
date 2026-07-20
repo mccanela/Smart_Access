@@ -45,12 +45,13 @@ class ApiConfig {
         'rota': '$socialhUrl/rota',
       },
       'condominio': {
-        'endereco': '$baseUrl/condominio',
+        'endereco': '$socialhUrl/condominio',
         'condominio': '$socialhUrl/condominio',
         'corpoDiretivo': '$baseUrl/corpodiretivolist',
         'param': '$socialhUrl/condominioparam',
         'equipamentolist': '$gateUrl/equipamentolist',
         'encriptcns': '$socialhUrl/encriptcns',
+        'CondominioGeoPosicao': '$socialhUrl/CondominioGeoPosicao',
       },
       'ramais': {
         'lista': '$socialhUrl/ramaislist',

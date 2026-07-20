@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:pdfx/pdfx.dart';
 //-----------------------------//
 // Web only: open links in a new browser tab
 //-----------------------------//
@@ -9,6 +10,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_html/flutter_html.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../core/config/api_config.dart';
 import '../../core/services/feedback_utils.dart';
 import '../../core/localization/app_localizations.dart';
@@ -157,6 +159,11 @@ class _CondominioModalState extends State<CondominioModal>
   final TextEditingController _searchTerceirizadosController =
       TextEditingController();
   final TextEditingController _searchAvisosController = TextEditingController();
+// Variáveis para guardar as URLs
+  String? _urlRegimento;
+  String? _urlMapaGaragem;
+  bool _loadingInfo = true;
+  PdfController? _pdfController;
 
   // Helper for Standard Search Decoration
   InputDecoration _standardSearchDecoration(BuildContext context,
@@ -247,7 +254,7 @@ class _CondominioModalState extends State<CondominioModal>
     _tabController = TabController(length: 6, vsync: this);
     _fetchEndereco();
     _fetchCorpoDiretivo();
-    _fetchRegimento();
+    _fetchCondominioInfo();
     _fetchTerceirizados();
     _fetchAvisosInternos();
   }
@@ -337,6 +344,55 @@ class _CondominioModalState extends State<CondominioModal>
     }
   }
 
+  Future<void> _fetchCondominioInfo() async {
+    setState(() {
+      _loadingInfo = true;
+    });
+
+    try {
+      final condominioId = await ApiConfig.getCondominioId();
+      final headers = await ApiConfig.getDefaultHeaders();
+
+      final response = await http.post(
+        Uri.parse(ApiConfig.getEndpoint('condominio', 'endereco')),
+        headers: headers,
+        body: jsonEncode({'condominio_id': condominioId}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        if (data['data'] != null &&
+            data['data']['result'] != null &&
+            (data['data']['result'] as List).isNotEmpty) {
+          final resultNode = data['data']['result'][0];
+
+          if (resultNode['informacoes'] != null) {
+            final informacoes = resultNode['informacoes'] as List;
+
+            // Vasculhando a lista para pegar cada URL pelo 'tipo'
+            for (var item in informacoes) {
+              if (item is Map) {
+                if (item['tipo'] == 'ri' && item['info'] != null) {
+                  _urlRegimento = item['info'].toString();
+                } else if (item['tipo'] == 'mapagaragem' &&
+                    item['info'] != null) {
+                  _urlMapaGaragem = item['info'].toString();
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('Erro ao buscar informações do condomínio: $e');
+    } finally {
+      setState(() {
+        _loadingInfo = false;
+      });
+    }
+  }
+
   Future<void> _fetchRegimento() async {
     setState(() {
       _loadingRegimento = true;
@@ -354,32 +410,43 @@ class _CondominioModalState extends State<CondominioModal>
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        //-----------------------------//
-        // Estruturas possíveis:
-        // - data['data']['riDoc']
-        // - data['riDoc']
-        // - data['data']['result'][0]['riDoc']
-        //-----------------------------//
-        final dynamic dataNode = data['data'] ?? {};
-        final dynamic resultNode =
-            dataNode is Map ? (dataNode['result'] ?? {}) : {};
-        final List<dynamic> docsDynamic =
-            (dataNode is Map && dataNode['riDoc'] is List)
-                ? List<dynamic>.from(dataNode['riDoc'])
-                : (data['riDoc'] is List)
-                    ? List<dynamic>.from(data['riDoc'])
-                    : (resultNode is List &&
-                            resultNode.isNotEmpty &&
-                            resultNode[0] is Map &&
-                            resultNode[0]['riDoc'] is List)
-                        ? List<dynamic>.from(resultNode[0]['riDoc'])
-                        : <dynamic>[];
-        final docs = docsDynamic
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+
+        if (data['data'] != null &&
+            data['data']['result'] != null &&
+            (data['data']['result'] as List).isNotEmpty) {
+          final resultNode = data['data']['result'][0];
+
+          if (resultNode['informacoes'] != null) {
+            final informacoes = resultNode['informacoes'] as List;
+
+            for (var item in informacoes) {
+              if (item is Map) {
+                if (item['tipo'] == 'ri' && item['info'] != null) {
+                  _urlRegimento = item['info'].toString();
+                } else if (item['tipo'] == 'mapagaragem' &&
+                    item['info'] != null) {
+                  _urlMapaGaragem = item['info'].toString();
+                }
+              }
+            }
+          }
+        }
+
+        // === NOVO: Baixar e preparar o PDF para exibição ===
+        if (_urlRegimento != null && _urlRegimento!.isNotEmpty) {
+          try {
+            final pdfResponse = await http.get(Uri.parse(_urlRegimento!));
+            if (pdfResponse.statusCode == 200) {
+              _pdfController = PdfController(
+                document: PdfDocument.openData(pdfResponse.bodyBytes),
+              );
+            }
+          } catch (e) {
+            print('Erro ao carregar os bytes do PDF: $e');
+          }
+        }
+
         setState(() {
-          _riDocs = docs;
           _loadingRegimento = false;
         });
       } else {
@@ -954,74 +1021,63 @@ class _CondominioModalState extends State<CondominioModal>
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_riDocs.isEmpty) {
+    if (_urlRegimento == null ||
+        _urlRegimento!.isEmpty ||
+        _pdfController == null) {
       return const Center(
-        child: Text('Regimento interno não disponível',
-            style: TextStyle(color: Colors.grey)),
+        child: Text(
+          'Regimento interno não disponível',
+          style: TextStyle(color: Colors.grey),
+        ),
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: _riDocs.length,
-      separatorBuilder: (_, __) => const Divider(height: 32),
-      itemBuilder: (context, index) {
-        final doc = _riDocs[index];
-        final titulo =
-            (doc['anunciocategoria_ds'] ?? 'Regimento Interno').toString();
-        final descricao = (doc['anuncio_ds'] ?? '').toString();
-        final url = (doc['caminho'] ?? doc['url_txt'] ?? '').toString();
-
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 4),
-              child: _buildTransparentIconGroup(
-                context,
-                [
-                  {
-                    'icon': Icons.download,
-                    'tooltip': 'Baixar regimento interno',
-                    'onPressed': () => _abrirDocumento(url),
-                  },
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(titulo, style: _tsSectionTitle(context)),
-                  if (descricao.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(descricao,
-                        style: _tsBody(context)
-                            .copyWith(color: getSecondaryTextColor(context))),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        );
-      },
+    // PDF embutido nativamente com o pacote pdfx!
+    return Container(
+      color: isDarkMode(context) ? const Color(0xFF1E1E1E) : Colors.white,
+      child: PdfView(
+        controller: _pdfController!,
+        scrollDirection:
+            Axis.vertical, // Permite rolar o PDF para cima e para baixo
+      ),
     );
   }
 
   Widget _buildMapaVagasTab() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            '',
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.grey,
+    if (_loadingRegimento) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_urlMapaGaragem == null || _urlMapaGaragem!.isEmpty) {
+      return const Center(
+        child: Text(
+          'Mapa de vagas não disponível',
+          style: TextStyle(color: Colors.grey),
+        ),
+      );
+    }
+
+    // Embutindo a Imagem nativamente com suporte a Zoom (movimento de pinça)
+    return Container(
+      color: isDarkMode(context) ? const Color(0xFF1E1E1E) : Colors.white,
+      child: InteractiveViewer(
+        panEnabled: true,
+        minScale: 0.5,
+        maxScale: 4.0, // Permite zoom de até 4x
+        child: Image.network(
+          _urlMapaGaragem!,
+          fit: BoxFit.contain,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return const Center(child: CircularProgressIndicator());
+          },
+          errorBuilder: (context, error, stackTrace) => const Center(
+            child: Text(
+              'Erro ao carregar o mapa de vagas.',
+              style: TextStyle(color: Colors.grey),
             ),
           ),
-        ],
+        ),
       ),
     );
   }

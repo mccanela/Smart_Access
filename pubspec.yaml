@@ -9,11 +9,12 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+  geolocator: ^11.0.0
+  geolocator_web: ^3.0.0 # Força o compilador a empacotar o plugin web
   cupertino_icons: ^1.0.8
   google_fonts: ^8.0.1
   material_symbols_icons: ^4.2906.0
   font_awesome_flutter: ^11.0.0
-
   flutter_date_range_picker: ^0.2.1
   http: ^1.2.1
   shared_preferences: ^2.2.2

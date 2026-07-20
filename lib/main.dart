@@ -5,6 +5,7 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:go_router/go_router.dart'; // <-- NOVO PACOTE DE ROTAS
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart';
 
 import 'features/dashboard/sidebar.dart'
     show
@@ -228,12 +229,14 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   ThemeMode _themeMode = ThemeMode.light;
   late final GoRouter _router;
-
+  late Future<Position> _posicaoFuture;
   @override
   void initState() {
     super.initState();
     _loadThemePreference();
 
+    _posicaoFuture = obterPosicaoObrigatoria();
+    print('posicao_obrigatória: ${_posicaoFuture}');
     // IMPLEMENTAÇÃO GO_ROUTER
     _router = GoRouter(
       initialLocation: '/',
@@ -262,6 +265,40 @@ class _MyAppState extends State<MyApp> {
         body: Center(child: Text('Página não encontrada (Erro 404).')),
       ),
     );
+  }
+
+  Future<Position> obterPosicaoObrigatoria() async {
+    bool servicoAtivado;
+    LocationPermission permissao;
+
+    // 1. Verifica se o serviço de localização da máquina/navegador está ativo
+    servicoAtivado = await Geolocator.isLocationServiceEnabled();
+    if (!servicoAtivado) {
+      // Retorna erro. Na sua UI, você deve mostrar uma tela: "Por favor, ative a localização do seu dispositivo."
+      return Future.error('Os serviços de localização estão desativados.');
+    }
+
+    // 2. Verifica o status da permissão atual
+    permissao = await Geolocator.checkPermission();
+    if (permissao == LocationPermission.denied) {
+      // Se estiver negada, solicita a permissão abrindo o pop-up do navegador
+      permissao = await Geolocator.requestPermission();
+
+      if (permissao == LocationPermission.denied) {
+        // O usuário clicou em "Bloquear". Você não deixa ele prosseguir.
+        return Future.error('Permissão de localização negada pelo usuário.');
+      }
+    }
+
+    if (permissao == LocationPermission.deniedForever) {
+      // O usuário bloqueou permanentemente no navegador.
+      // Ele terá que ir no cadeado ao lado da URL e liberar manualmente.
+      return Future.error(
+          'Permissão negada permanentemente. Altere as configurações do seu navegador para continuar.');
+    }
+
+    // 3. Se chegou até aqui, a permissão foi concedida. Retorna a latitude e longitude.
+    return await Geolocator.getCurrentPosition();
   }
 
   Future<void> _loadThemePreference() async {
@@ -379,8 +416,8 @@ class _MyAppState extends State<MyApp> {
           style: ButtonStyle(
             backgroundColor: WidgetStateProperty.all(Colors.black),
             foregroundColor: WidgetStateProperty.all(Colors.white),
-            textStyle:
-                WidgetStateProperty.all(const TextStyle(fontWeight: FontWeight.bold)),
+            textStyle: WidgetStateProperty.all(
+                const TextStyle(fontWeight: FontWeight.bold)),
             shape: WidgetStateProperty.all(
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
             padding: WidgetStateProperty.all(
@@ -454,8 +491,8 @@ class _MyAppState extends State<MyApp> {
           style: ButtonStyle(
             backgroundColor: WidgetStateProperty.all(Colors.black),
             foregroundColor: WidgetStateProperty.all(Colors.white),
-            textStyle:
-                WidgetStateProperty.all(const TextStyle(fontWeight: FontWeight.bold)),
+            textStyle: WidgetStateProperty.all(
+                const TextStyle(fontWeight: FontWeight.bold)),
             shape: WidgetStateProperty.all(
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
             padding: WidgetStateProperty.all(

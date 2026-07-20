@@ -24,6 +24,7 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
   bool _isLoading = false;
   String? _respostaDaIA;
   String? _perguntaFeita;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -31,7 +32,7 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
     super.dispose();
   }
 
-// Funçao auxiliar para obter condomínio ID do SignalR (preferencial) ou ApiConfig
+  // Funçao auxiliar para obter condomínio ID do SignalR (preferencial) ou ApiConfig
   Future<int> getCondominioIdAtual() async {
     // Prioridade 1: Pegar do SignalR se estiver disponível
     // Prioridade 2: Fallback para ApiConfig
@@ -80,9 +81,6 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
       );
 
       if (response.statusCode == 200) {
-        // Tenta fazer o parse da resposta JSON.
-        // Supondo que a API retorne algo como {"resposta": "texto da IA..."}
-        // Se retornar apenas texto puro, basta usar response.body.
         try {
           final data = jsonDecode(response.body);
           final raiz = data['data'];
@@ -125,17 +123,19 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
       });
       _controller.clear();
     }
-  }  @override
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final isDark = isDarkMode(context);
     final onCloseCallback = widget.onClose;
 
     return Container(
       decoration: BoxDecoration(
         color: getBackgroundColor(context),
+        borderRadius: BorderRadius.circular(16),
         border: Border(
           left: BorderSide(
-            color: isDark
+            color: isDarkMode(context)
                 ? Colors.white.withValues(alpha: 0.2)
                 : Colors.transparent,
             width: 1,
@@ -150,92 +150,97 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
             onClose: onCloseCallback ?? () => Navigator.of(context).pop(),
           ),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 620),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: getFormGrisColor(context),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: getBorderColor(context)),
-                    ),
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.max,
-                      children: [
-                        Text(
-                          'Dúvidas sobre regras e procedimentos?',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w300,
-                            color: isDark ? Colors.white70 : Colors.black,
-                          ),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: getCardColor(context),
+                  border: Border.all(color: getBorderColor(context), width: 1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(
+                          top: 24, left: 16, right: 16, bottom: 16),
+                      child: Text(
+                        'Dúvidas sobre regras e procedimentos?',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w300,
+                          color: getTextColor(context),
                         ),
-                        const SizedBox(height: 20),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          decoration: BoxDecoration(
-                            color: getFormGrisColor(context),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: getBorderColor(context)),
-                          ),
-                          child: Row(
-                            children: [
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: TextField(
-                                  controller: _controller,
-                                  focusNode: _focusNode,
-                                  onSubmitted: (_) => _enviar(),
-                                  decoration: InputDecoration(
-                                    hintText: "Pergunte a NOVIA-X",
-                                    hintStyle: TextStyle(
-                                        color: isDark ? Colors.white70 : Colors.black,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w300),
-                                    border: InputBorder.none,
-                                    isDense: true,
-                                  ),
-                                  style: TextStyle(
-                                    color: isDark ? Colors.white70 : Colors.black,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w300,
-                                  ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        decoration: BoxDecoration(
+                          color: getCardColor(context),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: getBorderColor(context)),
+                        ),
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: TextField(
+                                controller: _controller,
+                                focusNode: _focusNode,
+                                onSubmitted: (_) => _enviar(),
+                                decoration: InputDecoration(
+                                  hintText: "Pergunte a NOVIA-X",
+                                  hintStyle: TextStyle(
+                                      color: getSecondaryTextColor(context),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w300),
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                ),
+                                style: TextStyle(
+                                  color: getTextColor(context),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w300,
                                 ),
                               ),
-                              Container(
-                                margin: const EdgeInsets.symmetric(
-                                    vertical: 6, horizontal: 2),
-                                decoration: const BoxDecoration(
-                                  color: AppColors.primary,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: IconButton(
-                                  onPressed: _isLoading ? null : _enviar,
-                                  tooltip: 'Enviar',
-                                  icon: _isLoading
-                                      ? const SizedBox(
-                                          width: 12,
-                                          height: 12,
-                                          child: CircularProgressIndicator(
-                                              color: Colors.white, strokeWidth: 2))
-                                      : const Icon(Icons.arrow_upward,
-                                          color: Colors.white, size: 16),
-                                ),
+                            ),
+                            Container(
+                              margin: const EdgeInsets.symmetric(
+                                  vertical: 6, horizontal: 2),
+                              decoration: const BoxDecoration(
+                                color: AppColors.primary,
+                                shape: BoxShape.circle,
                               ),
-                            ],
-                          ),
+                              child: IconButton(
+                                onPressed: _isLoading ? null : _enviar,
+                                tooltip: 'Enviar',
+                                icon: _isLoading
+                                    ? const SizedBox(
+                                        width: 12,
+                                        height: 12,
+                                        child: CircularProgressIndicator(
+                                            color: Colors.white,
+                                            strokeWidth: 2))
+                                    : const Icon(Icons.arrow_upward,
+                                        color: Colors.white, size: 16),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        // Painel da Resposta da IA
-                        if (_respostaDaIA != null) _buildPainelResposta(context),
-                      ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: _respostaDaIA != null
+                          ? SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              child: _buildPainelResposta(context),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -244,6 +249,7 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
       ),
     );
   }
+
   Widget _buildPainelResposta(BuildContext context) {
     return Container(
       width: double.infinity,
@@ -254,13 +260,10 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
         border: Border.all(color: getBorderColor(context)),
       ),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start, // Mantém a resposta da IA à esquerda
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              // O Expanded força o Text a ocupar a largura toda da Row,
-              // permitindo que o textAlign funcione e evitando overflow.
               Expanded(
                 child: Text(
                   'Pergunta: $_perguntaFeita',

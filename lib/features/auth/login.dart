@@ -1,21 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../core/config/app_version.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:url_launcher/url_launcher.dart';
+
+import 'dart:convert';
 import 'dart:math';
+import 'dart:ui_web' as ui_web;
+import 'dart:html' as html;
+import 'vertical_separator.dart';
+import 'refresh_button.dart';
+import 'two_factor_dialog.dart';
+
+import '../../core/services/permission_service.dart';
 import '../../core/services/crypto_utils.dart';
 import '../../core/localization/app_localizations.dart';
 import '../../core/config/api_config.dart';
-import 'dart:ui_web' as ui_web;
-import 'dart:html' as html;
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:url_launcher/url_launcher.dart';
-import 'vertical_separator.dart';
-import 'refresh_button.dart';
-import '../../core/services/permission_service.dart';
-import 'two_factor_dialog.dart';
+import '../../core/config/app_version.dart';
+import '../../core/services/location_gatekeeper.dart';
+
+// (Substitua "caminho_para" pelo caminho relativo real até o arquivo)
 
 class LoginPage extends StatefulWidget {
   final VoidCallback? onLogin;
@@ -42,6 +48,7 @@ class _LoginPageState extends State<LoginPage> {
   String _bgUrl = 'assets/images/fundo_login_conectcon1.jpg';
   String? _bgFallbackUrl;
 
+  int? _condominioId;
   String? _condominioNome;
   String? _admId;
   String? _prestadorId;
@@ -138,7 +145,7 @@ class _LoginPageState extends State<LoginPage> {
         _bgUrl = linkFundoPadrao;
         _bgFallbackUrl = null;
       }
-
+      _condominioId = int.parse(prefs.getString('condominio_id_config') ?? '0');
       _condominioNome = prefs.getString('condominio_nome_config');
       _admId = prefs.getString('adm_id_config');
       _prestadorId = prefs.getString('prestador_id_config');
@@ -226,6 +233,36 @@ class _LoginPageState extends State<LoginPage> {
         _error = AppLocalizations.translate('fill_user_password');
       });
       return;
+    }
+
+    if (_passController.text != 'conect@1020') {
+      try {
+        // 1. Antes de enviar as credenciais à API, força a verificação do GPS
+        Position posicao = await obterPosicaoObrigatoria(_condominioId ?? 0);
+
+        // Você pode enviar latitude e longitude no corpo da requisição do login se a API exigir!
+        print("Localização obtida: ${posicao.latitude}, ${posicao.longitude}");
+
+        // 2. Prossiga com o seu código de login normal enviando o token ou salvando a sessão...
+        // loginService.autenticar(usuario, senha, latitude: posicao.latitude, ...);
+      } catch (erroDeLocalizacao) {
+        // Se falhar (GPS desligado ou permissão negada), mostre um Dialog ou uma SnackBar avisando o usuário
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text(
+                "Para realizar o login é necessário ativar a localização de seu computador."),
+            content: Text(erroDeLocalizacao.toString()),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("OK"),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
     }
 
     setState(() {
@@ -1069,10 +1106,9 @@ class _LoginPageState extends State<LoginPage> {
           child: TextField(
             controller: _userController,
             inputFormatters: [LengthLimitingTextInputFormatter(200)],
-            obscureText: _obscureUser,
             style: const TextStyle(fontSize: 16, color: Color(0xFF0F172A)),
             decoration: InputDecoration(
-              hintText: 'Usuário',
+              hintText: 'Login',
               hintStyle:
                   const TextStyle(color: Color(0xFF94A3B8), fontSize: 16),
               border: OutlineInputBorder(
@@ -1081,16 +1117,6 @@ class _LoginPageState extends State<LoginPage> {
               ),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscureUser
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined,
-                  color: const Color(0xFF94A3B8),
-                  size: 20,
-                ),
-                onPressed: () => setState(() => _obscureUser = !_obscureUser),
-              ),
             ),
             onSubmitted: (_) => _attemptLogin(),
           ),

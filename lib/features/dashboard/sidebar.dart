@@ -89,7 +89,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
       _SidebarItemData('Turnos', Icons.schedule_rounded, 'turnos'),
       _SidebarItemData('Encomenda', Icons.inventory_2_rounded, null,
           url: _urlEncomendas),
-      _SidebarItemData('Novia X', Icons.smart_toy_outlined, 'noviax'),
+      // _SidebarItemData('Novia X', Icons.smart_toy_outlined, 'noviax'),
     ];
 
     return allItems.where((item) {
