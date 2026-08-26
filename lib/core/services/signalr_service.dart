@@ -112,13 +112,9 @@ class SignalRService {
       ]).build();
 
       // 4. Configurar handlers
-      print('[SignalR] 📋 Configurando event handlers...');
       _setupEventHandlers();
 
-      // 5. Conectar
-      print('[SignalR] 🔌 Iniciando conexão...');
       await _hubConnection!.start();
-      print('[SignalR] ✅ Conectado e ativo. Estado: ${_hubConnection!.state}');
       _notifyConnectionState(true);
 
       // 5.5 Entrar no Grupo do Condominio (CRUCIAL PARA REALTIME)

@@ -22,6 +22,7 @@ import 'features/modals/condominio_modal.dart' show CondominioPanel;
 import 'features/modals/ajustes_modal.dart' show AjustesModal;
 import 'features/modals/novidades_modal.dart' show NovidadesModal;
 import 'features/modals/noviax_modal.dart' show ConectConIAPanel;
+import 'features/modals/upgrade_modal.dart' show UpgradeModal;
 import 'features/modals/cameras_modal.dart'
     show showCamerasModal, isCamerasView, CamerasModal;
 import 'features/dashboard/dashboard_panels.dart'
@@ -626,15 +627,24 @@ class _ClientAppFlowState extends State<ClientAppFlow> {
 
     Widget? panelWidget;
     String panelKey;
-
+    String _grupoEmFoco = 'EntradaSaidas';
     switch (modal) {
       case 'alertas':
         panelWidget = AlertasScreen(onClose: () => _closeSidePanel('alertas'));
         panelKey = 'alertas';
         break;
       case 'ocorrencias':
-        panelWidget =
-            OcorrenciasScreen(onClose: () => _closeSidePanel('ocorrencias'));
+        panelWidget = OcorrenciasScreen(
+          onClose: () => _closeSidePanel('ocorrencias'),
+          // --- ADICIONE OS PARÂMETROS AQUI ---
+          hasFocus: _grupoEmFoco == 'Ocorrencias',
+          onFocusRequested: () {
+            setState(() {
+              _grupoEmFoco = 'Ocorrencias';
+            });
+          },
+          // ------------------------------------
+        );
         panelKey = 'ocorrencias';
         break;
       case 'ramais':
@@ -667,6 +677,11 @@ class _ClientAppFlowState extends State<ClientAppFlow> {
         panelWidget =
             ConectConIAPanel(onClose: () => _closeSidePanel('noviax'));
         panelKey = 'noviax';
+        break;
+      // ADICIONE ESTE BLOCO AQUI:
+      case 'upgrade':
+        panelWidget = UpgradeModal(onClose: () => _closeSidePanel('upgrade'));
+        panelKey = 'upgrade';
         break;
       case 'encomendas':
         panelWidget =

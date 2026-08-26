@@ -7,21 +7,21 @@ class ApiConfig {
   static String get baseUrl {
     final language = AppLocalizations.currentLanguage;
     return language == 'en'
-        ? 'https://socialh.conectcon.net.br/usa'
+        ? 'https://socialh.conectcon.net.br/en'
         : 'https://socialh.conectcon.net.br/pt-br';
   }
 
   static String get gateUrl {
     final language = AppLocalizations.currentLanguage;
     return language == 'en'
-        ? 'https://gate.conectcon.net.br/usa'
+        ? 'https://gate.conectcon.net.br/en'
         : 'https://gate.conectcon.net.br/pt-br';
   }
 
   static String get socialhUrl {
     final language = AppLocalizations.currentLanguage;
     return language == 'en'
-        ? 'https://socialh.conectcon.net.br/usa'
+        ? 'https://socialh.conectcon.net.br/en'
         : 'https://socialh.conectcon.net.br/pt-br';
   }
 
@@ -52,9 +52,13 @@ class ApiConfig {
         'equipamentolist': '$gateUrl/equipamentolist',
         'encriptcns': '$socialhUrl/encriptcns',
         'CondominioGeoPosicao': '$socialhUrl/CondominioGeoPosicao',
+        'espacosociallist': '$socialhUrl/espacosociallist',
       },
       'ramais': {
         'lista': '$socialhUrl/ramaislist',
+      },
+      'avisos': {
+        'avisolist': '$socialhUrl/avisolist',
       },
       'chaves': {
         'lista': '$gateUrl/chavesdisponiveis',
@@ -125,6 +129,7 @@ class ApiConfig {
         'atualizar': '$socialhUrl/convidadoupd/',
         'entrada': '$socialhUrl/convidadomov/',
         'saida': '$socialhUrl/convidadomov/',
+        'listarestricao': '$gateUrl/negra_lista/',
       },
     };
   }

@@ -7,6 +7,7 @@ import '../../core/config/api_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/crypto_utils.dart';
 import '../../shared/widgets/screen_header.dart';
+import '../../shared/widgets/character_counter_field.dart';
 
 /// Painel visual do assistente ConectCon IA.
 class ConectConIAPanel extends StatefulWidget {
@@ -18,33 +19,91 @@ class ConectConIAPanel extends StatefulWidget {
 }
 
 class _ConectConIAPanelState extends State<ConectConIAPanel> {
-  final TextEditingController _controller = TextEditingController();
+  final TextEditingController _leftSearchController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
 
   bool _isLoading = false;
+  bool _isSmartAccess = false;
+
+  // Variáveis de estado para a resposta da IA (Esquerda)
   String? _respostaDaIA;
   String? _perguntaFeita;
 
+  // Variáveis de estado para o histórico (Direita)
+  List<Map<String, String>> _historicoPerguntas = [];
+  String? _perguntaSelecionada;
+  String? _respostaSelecionada;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+    _carregarHistoricoLocal();
+  }
+
+  Future<void> _loadPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _isSmartAccess = prefs.getBool('is_smart_access') ?? false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar is_smart_access: $e');
+    }
+  }
+
+  // --- Funções de Persistência Local ---
+  Future<void> _carregarHistoricoLocal() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? jsonString = prefs.getString('noviax_historico_perguntas');
+      if (jsonString != null && jsonString.isNotEmpty) {
+        final List<dynamic> decoded = jsonDecode(jsonString);
+        setState(() {
+          _historicoPerguntas = decoded
+              .map((item) => Map<String, String>.from(item as Map))
+              .toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar histórico local: $e');
+    }
+  }
+
+  Future<void> _salvarPerguntaNoHistorico(
+      String pergunta, String resposta) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Remove caso a pergunta já exista (evita duplicidade) e insere no topo
+      _historicoPerguntas.removeWhere((item) => item['pergunta'] == pergunta);
+      _historicoPerguntas.insert(0, {
+        'pergunta': pergunta,
+        'resposta': resposta,
+      });
+
+      final String jsonString = jsonEncode(_historicoPerguntas);
+      await prefs.setString('noviax_historico_perguntas', jsonString);
+
+      setState(() {});
+    } catch (e) {
+      debugPrint('Erro ao salvar no histórico local: $e');
+    }
+  }
+
   @override
   void dispose() {
-    _controller.dispose();
+    _leftSearchController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
-  // Funçao auxiliar para obter condomínio ID do SignalR (preferencial) ou ApiConfig
-  Future<int> getCondominioIdAtual() async {
-    // Prioridade 1: Pegar do SignalR se estiver disponível
-    // Prioridade 2: Fallback para ApiConfig
-    final condominioIdStr = await ApiConfig.getCondominioId();
-    return int.tryParse(condominioIdStr) ?? 0;
-  }
-
   Future<void> _enviar() async {
-    final pergunta = _controller.text.trim();
+    final pergunta = _leftSearchController.text.trim();
     if (pergunta.isEmpty) return;
 
-    // Desfoca o teclado e inicia o loading
     _focusNode.unfocus();
     setState(() {
       _isLoading = true;
@@ -62,7 +121,10 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
     final tokenSessao =
         (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
 
-    if (condominioId.isEmpty || tokenSessao.isEmpty) return;
+    if (condominioId.isEmpty || tokenSessao.isEmpty) {
+      setState(() => _isLoading = false);
+      return;
+    }
 
     try {
       final url =
@@ -81,21 +143,22 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
       );
 
       if (response.statusCode == 200) {
+        String textoResposta = '';
         try {
           final data = jsonDecode(response.body);
           final raiz = data['data'];
-          final texto = raiz.replaceAll(r'\n', '<br/>');
-          setState(() {
-            _respostaDaIA = texto ?? response.body;
-            _perguntaFeita = pergunta;
-          });
+          textoResposta = (raiz as String).replaceAll(r'\n', '\n');
         } catch (e) {
-          // Fallback caso a resposta não seja um JSON válido e sim texto plano
-          setState(() {
-            _respostaDaIA = response.body;
-            _perguntaFeita = pergunta;
-          });
+          textoResposta = response.body;
         }
+
+        setState(() {
+          _respostaDaIA = textoResposta;
+          _perguntaFeita = pergunta;
+        });
+
+        // Salva localmente a pergunta e a resposta formatada
+        await _salvarPerguntaNoHistorico(pergunta, textoResposta);
       } else {
         FeedbackUtils.showWarning(
           context: context,
@@ -121,18 +184,15 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
       setState(() {
         _isLoading = false;
       });
-      _controller.clear();
+      _leftSearchController.clear();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final onCloseCallback = widget.onClose;
-
     return Container(
       decoration: BoxDecoration(
         color: getBackgroundColor(context),
-        borderRadius: BorderRadius.circular(16),
         border: Border(
           left: BorderSide(
             color: isDarkMode(context)
@@ -145,103 +205,20 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
       child: Column(
         children: [
           ScreenHeader(
-            icon: Icons.smart_toy_outlined,
-            title: 'Novia X',
-            onClose: onCloseCallback ?? () => Navigator.of(context).pop(),
+            icon: Icons.auto_awesome,
+            title: 'NOVIA X',
+            onClose: widget.onClose ?? () => Navigator.of(context).pop(),
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: getCardColor(context),
-                  border: Border.all(color: getBorderColor(context), width: 1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(
-                          top: 24, left: 16, right: 16, bottom: 16),
-                      child: Text(
-                        'Dúvidas sobre regras e procedimentos?',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w300,
-                          color: getTextColor(context),
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        decoration: BoxDecoration(
-                          color: getCardColor(context),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: getBorderColor(context)),
-                        ),
-                        child: Row(
-                          children: [
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: TextField(
-                                controller: _controller,
-                                focusNode: _focusNode,
-                                onSubmitted: (_) => _enviar(),
-                                decoration: InputDecoration(
-                                  hintText: "Pergunte a NOVIA-X",
-                                  hintStyle: TextStyle(
-                                      color: getSecondaryTextColor(context),
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w300),
-                                  border: InputBorder.none,
-                                  isDense: true,
-                                ),
-                                style: TextStyle(
-                                  color: getTextColor(context),
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w300,
-                                ),
-                              ),
-                            ),
-                            Container(
-                              margin: const EdgeInsets.symmetric(
-                                  vertical: 6, horizontal: 2),
-                              decoration: const BoxDecoration(
-                                color: AppColors.primary,
-                                shape: BoxShape.circle,
-                              ),
-                              child: IconButton(
-                                onPressed: _isLoading ? null : _enviar,
-                                tooltip: 'Enviar',
-                                icon: _isLoading
-                                    ? const SizedBox(
-                                        width: 12,
-                                        height: 12,
-                                        child: CircularProgressIndicator(
-                                            color: Colors.white,
-                                            strokeWidth: 2))
-                                    : const Icon(Icons.arrow_upward,
-                                        color: Colors.white, size: 16),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Expanded(
-                      child: _respostaDaIA != null
-                          ? SingleChildScrollView(
-                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                              child: _buildPainelResposta(context),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                  ],
-                ),
+              padding: const EdgeInsets.all(32),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _buildLeftColumn()),
+                  const SizedBox(width: 18),
+                  Expanded(child: _buildRightColumn()),
+                ],
               ),
             ),
           ),
@@ -250,43 +227,333 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
     );
   }
 
-  Widget _buildPainelResposta(BuildContext context) {
+  Widget _buildLeftColumn() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: getFormGrisColor(context),
+        color: getCardColor(context),
+        border: Border.all(color: getBorderColor(context), width: 1.5),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: getBorderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(14.5)),
+            child: Stack(
+              children: [
+                Image.network(
+                  'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/geral/noviax.png',
+                  height: 180,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    height: 180,
+                    color: Colors.blueGrey,
+                    alignment: Alignment.center,
+                    child: const Text('Imagem não encontrada',
+                        style: TextStyle(color: Colors.white)),
+                  ),
+                ),
+                const Positioned(
+                  bottom: 12,
+                  left: 16,
+                  child: Text(
+                    'Procedimentos',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const Positioned(
+                  top: 12,
+                  right: 12,
+                  child: Icon(Icons.info_outline, color: Colors.white),
+                )
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildSearchField(
+                    controller: _leftSearchController,
+                    labelText: 'Preciso saber como...',
+                    onEnterPressed: _isLoading ? null : _enviar,
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '2/5 consultas disponíveis hoje',
+                      style: TextStyle(
+                          fontSize: 10, color: getSecondaryTextColor(context)),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  if (_isLoading)
+                    const Center(child: CircularProgressIndicator())
+                  else if (_respostaDaIA != null)
+                    _buildResultadoIA()
+                  else
+                    _buildPlaceholderProcedimento(),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchField({
+    required TextEditingController controller,
+    required String labelText,
+    VoidCallback? onEnterPressed,
+  }) {
+    return CharacterCounterField(
+      controller: controller,
+      focusNode: controller == _leftSearchController ? _focusNode : null,
+      maxLength: 100,
+      onSubmitted: (_) {
+        if (onEnterPressed != null) onEnterPressed();
+      },
+      decoration: inputDecorationPadrao(
+        context,
+        labelText: labelText,
+      ).copyWith(
+        suffixIcon: InkWell(
+          onTap: onEnterPressed,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
+            child: Text(
+              'Enter',
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRightColumn() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: getCardColor(context),
+        border: Border.all(color: getBorderColor(context), width: 1.5),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Pergunta: $_perguntaFeita',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: getTextColor(context),
-                  ),
-                  textAlign: TextAlign.right,
-                ),
+              Icon(Icons.bookmark, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Text(
+                'Favoritos / Histórico',
+                style: AppTextStyles.title(context),
               ),
+              const SizedBox(width: 8),
+              Icon(Icons.unfold_more, color: getSecondaryTextColor(context)),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            _respostaDaIA!,
-            style: TextStyle(
-              color: getTextColor(context),
-              fontSize: 15,
-              height: 1.5,
+          const SizedBox(height: 20),
+
+          // DropdownButton com o Histórico Local
+          DropdownButtonFormField<String>(
+            isExpanded: true,
+            value: _perguntaSelecionada,
+            decoration: inputDecorationPadrao(
+              context,
+              labelText: 'Selecione um procedimento salvo',
+            ),
+            dropdownColor: getCardColor(context),
+            hint: Text(
+              _historicoPerguntas.isEmpty
+                  ? 'Nenhum histórico encontrado'
+                  : 'Escolha uma pergunta...',
+              style: TextStyle(
+                fontSize: 14,
+                color: getSecondaryTextColor(context),
+              ),
+            ),
+            items: _historicoPerguntas.map((item) {
+              return DropdownMenuItem<String>(
+                value: item['pergunta'],
+                child: Text(
+                  item['pergunta'] ?? '',
+                  overflow: TextOverflow
+                      .ellipsis, // Evita quebrar a linha no dropdown fechado
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: getTextColor(context),
+                  ),
+                ),
+              );
+            }).toList(),
+            onChanged: (novoValor) {
+              if (novoValor != null) {
+                final itemEncontrado = _historicoPerguntas.firstWhere(
+                  (element) => element['pergunta'] == novoValor,
+                  orElse: () => {'resposta': ''},
+                );
+
+                setState(() {
+                  _perguntaSelecionada = novoValor;
+                  _respostaSelecionada = itemEncontrado['resposta'];
+                });
+              }
+            },
+          ),
+          const SizedBox(height: 20),
+
+          // Renderização Dinâmica da Resposta Selecionada (ou texto vazio)
+          Expanded(
+            child: SingleChildScrollView(
+              child: _respostaSelecionada != null &&
+                      _respostaSelecionada!.isNotEmpty
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _perguntaSelecionada ?? '',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: getTextColor(context)),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _respostaSelecionada!,
+                          style: TextStyle(
+                              fontSize: 14,
+                              color: getTextColor(context),
+                              height: 1.4),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            IconButton(
+                                icon: Icon(Icons.thumb_up_alt_outlined,
+                                    color: getSecondaryTextColor(context)),
+                                onPressed: () {}),
+                            IconButton(
+                                icon: Icon(Icons.thumb_down_alt_outlined,
+                                    color: getSecondaryTextColor(context)),
+                                onPressed: () {}),
+                            IconButton(
+                                icon: Icon(Icons.bookmark,
+                                    color: AppColors.primary),
+                                onPressed: () {}),
+                          ],
+                        ),
+                      ],
+                    )
+                  : Center(
+                      child: Text(
+                        _historicoPerguntas.isEmpty
+                            ? 'Faça uma pergunta ao lado para salvar o histórico.'
+                            : 'Selecione uma pergunta acima para ver a resposta.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: getSecondaryTextColor(context),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildPlaceholderProcedimento() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '',
+          style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: getTextColor(context)),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '',
+          style: TextStyle(
+              fontSize: 14, color: getTextColor(context), height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            IconButton(
+                icon: Icon(Icons.thumb_up_alt_outlined,
+                    color: getSecondaryTextColor(context)),
+                onPressed: () {}),
+            IconButton(
+                icon: Icon(Icons.thumb_down_alt_outlined,
+                    color: getSecondaryTextColor(context)),
+                onPressed: () {}),
+            IconButton(
+                icon: Icon(Icons.bookmark_border,
+                    color: getSecondaryTextColor(context)),
+                onPressed: () {}),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildResultadoIA() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _perguntaFeita ?? 'Resultado',
+          style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: getTextColor(context)),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          _respostaDaIA ?? '',
+          style: TextStyle(
+              fontSize: 14, color: getTextColor(context), height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            IconButton(
+                icon: Icon(Icons.thumb_up_alt_outlined,
+                    color: getSecondaryTextColor(context)),
+                onPressed: () {}),
+            IconButton(
+                icon: Icon(Icons.thumb_down_alt_outlined,
+                    color: getSecondaryTextColor(context)),
+                onPressed: () {}),
+            IconButton(
+                icon: Icon(Icons.bookmark_border,
+                    color: getSecondaryTextColor(context)),
+                onPressed: () {}),
+          ],
+        ),
+      ],
     );
   }
 }

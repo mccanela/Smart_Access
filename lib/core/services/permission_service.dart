@@ -90,7 +90,6 @@ class PermissionService {
       await prefs.reload(); // Garantir dados frescos
 
       final token = tokenOverride ?? await ApiConfig.getBearerToken();
-      print('🔍 [PermissionService] Token disponível: ${token.isNotEmpty}');
 
       if (token.isEmpty) {
         print('⚠️ [PermissionService] Sem token. Mantendo cache se existir.');
@@ -114,22 +113,22 @@ class PermissionService {
         }
       }
 
-      print('🔍 [PermissionService] Condomínio ID resolvido: $condominioId');
-
       if (condominioId == 0) {
         print(
             '⚠️ [PermissionService] Condomínio ID não encontrado (0). Abortando requisição para preservar cache.');
         return;
       }
 
+      final perfilStr = prefs.getString('perfil_id') ?? '0';
+      final _perfilId = int.tryParse(perfilStr) ?? 0;
+
       // Payload conforme solicitado (com funcoes_id para garantir compatibilidade)
       final payload = {
         "condominio_id": condominioId,
-        "perfil_id": 3,
+        "perfil_id": _perfilId,
         "funcoes_id": 0
       };
       final url = Uri.parse(ApiConfig.getEndpoint('auth', 'permissoes'));
-      print('🔒 [PermissionService] Atualizando permissões: $url');
 
       final response = await http.post(
         url,

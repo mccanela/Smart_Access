@@ -127,6 +127,7 @@ class _FacialCaptureModalState extends State<FacialCaptureModal> {
   html.DivElement? _root;
   String? _currentViewType;
   bool _initializing = true;
+  bool _isCameraReady = false;
 
   // Funções auxiliares para cores adaptáveis ao tema
   bool isDarkMode(BuildContext context) {
@@ -311,6 +312,13 @@ class _FacialCaptureModalState extends State<FacialCaptureModal> {
   }
 
   Future<void> _startStream() async {
+    // 👉 2. Garante que o botão fique travado sempre que mudar/iniciar a câmera
+    if (_mounted) {
+      setState(() {
+        _isCameraReady = false;
+      });
+    }
+
     try {
       final nav = html.window.navigator;
       final mediaDevices = nav.mediaDevices;
@@ -377,9 +385,14 @@ class _FacialCaptureModalState extends State<FacialCaptureModal> {
           setState(() {
             _initializing = false;
           });
-          // Pequeno delay apenas para UI update se necessário, mas reduzido
-          Future.delayed(const Duration(milliseconds: 50), () {
-            if (_mounted) setState(() {});
+
+          // 👉 3. SUBSTITUA O DELAY DE 50ms POR ESTE DELAY DE 3 SEGUNDOS
+          Future.delayed(const Duration(seconds: 3), () {
+            if (_mounted) {
+              setState(() {
+                _isCameraReady = true; // Libera o botão após a câmera aquecer
+              });
+            }
           });
         }
       }
@@ -761,16 +774,30 @@ class _FacialCaptureModalState extends State<FacialCaptureModal> {
                                 ),
                               ),
 
-                          // Botão de captura (sempre habilitado)
+                          // Botão de captura (AGORA COM TRAVA DE AQUECIMENTO)
                           Positioned(
                             bottom: 16,
                             child: ElevatedButton.icon(
-                              onPressed: _capture,
-                              icon: const Icon(Icons.camera_alt, size: 20),
-                              label: const Text('Tirar Foto'),
+                              // Se _isCameraReady for false, onPressed fica null (desabilita o botão)
+                              onPressed: _isCameraReady ? _capture : null,
+                              icon: _isCameraReady
+                                  ? const Icon(Icons.camera_alt, size: 20)
+                                  : const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                              label: Text(_isCameraReady
+                                  ? 'Tirar Foto'
+                                  : 'Ajustando luz...'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.white,
                                 foregroundColor: Colors.black,
+                                disabledBackgroundColor: Colors.grey.shade300,
+                                disabledForegroundColor: Colors.grey.shade600,
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 20, vertical: 10),
                                 shape: RoundedRectangleBorder(

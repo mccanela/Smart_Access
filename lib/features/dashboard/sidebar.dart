@@ -51,7 +51,9 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
   bool _openSettingsToRight =
       false; // Define se o menu abre para o lado ou para cima
   String _urlEncomendas =
-      'https://encomendas-6q3.pages.dev/'; // Nome do porteiro para tooltip
+      'https://encomenda.conectcon.net.br/'; // Nome do porteiro para tooltip
+
+  bool _isSmartAccess = false; // se tem SmartAccess
   //-----------------------------//
   // Método público para resetar seleção
   //-----------------------------//
@@ -60,6 +62,19 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
       setState(() {
         _selectedIndex = null;
       });
+    }
+  }
+
+  Future<void> _loadPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _isSmartAccess = prefs.getBool('is_smart_access') ?? false;
+        });
+      }
+    } catch (e) {
+      print('Erro ao carregar is_smart_access: $e');
     }
   }
 
@@ -78,20 +93,25 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
   }
 
   List<_SidebarItemData> get _items {
+    _loadPreferences();
+
     final allItems = [
       // _SidebarItemData('Ocorrências', Icons.report_problem_rounded, 'ocorrencias'),
       _SidebarItemData('Chaves', Icons.key_rounded, 'chaves'),
       _SidebarItemData('Ramais', Icons.phone_in_talk_rounded, 'ramais'),
-
       _SidebarItemData('Condominio', Icons.business_rounded, 'condominio'),
       _SidebarItemData(
           'Alertas', Icons.notifications_active_rounded, 'alertas'),
       _SidebarItemData('Turnos', Icons.schedule_rounded, 'turnos'),
       _SidebarItemData('Encomenda', Icons.inventory_2_rounded, null,
           url: _urlEncomendas),
-      // _SidebarItemData('Novia X', Icons.smart_toy_outlined, 'noviax'),
+      _SidebarItemData('Novia X', Icons.auto_awesome, 'noviax'),
     ];
-
+// ADICIONE ESTA CONDIÇÃO AQUI
+    if (_isSmartAccess == false) {
+      allItems.add(_SidebarItemData(
+          'Upgrade Smart Access', Icons.rocket_launch, 'upgrade'));
+    }
     return allItems.where((item) {
       // Itens com URL externa sempre são exibidos (links para módulos externos)
       if (item.url != null) return true;
@@ -198,7 +218,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
         print('Token de sessão não encontrado');
         return;
       }
-      print('Carregando token de encomenda para tokenSessao: $tokenSessao');
+
       final url = Uri.parse(ApiConfig.getEndpoint('condominio', 'encriptcns'));
       final response = await http.post(
         url,
@@ -213,8 +233,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
         final dataCripto = jsonDecode(response.body);
         final usercripto = dataCripto['data']['usucrypto'];
         final sigla = dataCripto['data']['sigla'];
-        print('Resposta encriptcns: $usercripto');
-
         if (usercripto != null && usercripto.toString().isNotEmpty && mounted) {
           setState(() {
             _urlEncomendas += sigla + '/?card=' + usercripto;
@@ -595,8 +613,8 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       child: SizedBox(
                         width: logoSize,
                         height: logoSize,
-                        child: Image.asset(
-                          'assets/images/0dc836ea-409a-4737-83c0-89532a174dcc-md-removebg-preview.png',
+                        child: Image.network(
+                          'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/geral/rodape_oficial_cns.png',
                           fit: BoxFit.contain,
                           errorBuilder: (context, error, stackTrace) =>
                               const Icon(
@@ -716,8 +734,8 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                     children: [
                       // Novidades
                       _buildSettingsItem(
-                        icon: Icons.new_releases_rounded,
-                        label: 'Novidades',
+                        icon: Icons.whatshot,
+                        label: 'Versoes',
                         onTap: () {
                           _closeSettingsMenu();
                           if (widget.onOpenModal != null) {

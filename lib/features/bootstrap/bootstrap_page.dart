@@ -57,7 +57,7 @@ class _BootstrapPageState extends State<BootstrapPage> {
         } catch (_) {}
       }
       if (href.isEmpty) href = html.window.location.href;
-      print('🔍 [BOOTSTRAP] Raw HREF: $href');
+
       final uri = Uri.parse(href);
 
       // Strategy 1: Hash Fragment (e.g., /#/summit)
@@ -70,7 +70,6 @@ class _BootstrapPageState extends State<BootstrapPage> {
         final parts = cleanFragment.split('/');
         for (final part in parts) {
           if (part.isNotEmpty) {
-            print('🔍 [BOOTSTRAP] Slug found in FRAGMENT: $part');
             return part;
           }
         }
@@ -86,7 +85,6 @@ class _BootstrapPageState extends State<BootstrapPage> {
           if (segment.isNotEmpty &&
               segment != 'index.html' &&
               segment != 'rota') {
-            print('🔍 [BOOTSTRAP] Slug found in PATH: $segment');
             return segment;
           }
         }
@@ -103,12 +101,11 @@ class _BootstrapPageState extends State<BootstrapPage> {
           !host.contains('firebaseapp.com')) {
         final hostParts = host.split('.');
         if (hostParts.length >= 3 && hostParts[0] != 'www') {
-          print('🔍 [BOOTSTRAP] Slug found in SUBDOMAIN: ${hostParts[0]}');
           return hostParts[0];
         }
       }
     }
-    print('🔍 [BOOTSTRAP] No slug found from URL parsing (ROOT).');
+
     return null;
   }
 
@@ -130,32 +127,21 @@ class _BootstrapPageState extends State<BootstrapPage> {
       final normCurrent = safeCurrentSlug.trim().toLowerCase();
       final normSaved = safeSavedSlug.trim().toLowerCase();
 
-      print(
-          '🔍 [BOOTSTRAP] Saved="$safeSavedSlug", Current="$safeCurrentSlug", HasSession=$hasSession, HasSlugKey=$hasSlugKey');
-
       // ---------------------------------------------------------
       // 🔐 LÓGICA DE SESSÃO APRIMORADA
       // Qualquer mudança de URL (slug) ativa deve provocar Logout.
 
       bool shouldWipe = false;
 
-      print('🧐 [BOOTSTRAP DEBUG] Comparando Slugs:');
-      print('   -> Current (URL): "$normCurrent" (Raw: "$safeCurrentSlug")');
-      print('   -> Saved (Pref):  "$normSaved" (Raw: "$safeSavedSlug")');
-
       if (hasSession) {
         if (normSaved.isEmpty && normCurrent.isNotEmpty) {
           // 🔄 SAÍDA DA ROOT: Estava na root e foi para um condomínio específico
-          print(
-              '🔄 [BOOTSTRAP] Saída da Root detectada ("" -> "$normCurrent"). Forçando Logout.');
           shouldWipe = true;
         } else if (normCurrent == normSaved) {
           // ✅ MESMO CONDOMÍNIO
-          print('✅ [BOOTSTRAP] Slugs IDÊNTICOS. Mantendo sessão.');
           shouldWipe = false;
         } else {
           // 🔄 MUDANÇA GENÉRICA
-          print('🔄 [BOOTSTRAP] Slugs DIFERENTES. Forçando Logout.');
           shouldWipe = true;
         }
       } else {
@@ -168,8 +154,6 @@ class _BootstrapPageState extends State<BootstrapPage> {
       // ---------------------------------------------------------
 
       if (shouldWipe) {
-        print('🧹 [BOOTSTRAP] LOGOUT - Iniciando limpeza completa...');
-
         // 1. Deletar sessão na API
         try {
           final encryptedToken = prefs.getString('tokensessao_txt');
@@ -202,7 +186,6 @@ class _BootstrapPageState extends State<BootstrapPage> {
             html.window.localStorage.remove('flutter.tokensessao_txt');
             html.window.localStorage.remove('flutter.app_slug');
             html.window.localStorage.remove('flutter.condominio_id');
-            print('🧹 [BOOTSTRAP] LocalStorage limpo manualmente.');
           } catch (e) {
             print('⚠️ Erro ao limpar LocalStorage: $e');
           }
@@ -223,8 +206,6 @@ class _BootstrapPageState extends State<BootstrapPage> {
         // Only force reload IF there was a session that we just destroyed.
         // If we are already clean, reloading causes a loop on the Login page.
         if (kIsWeb && hasSession) {
-          print(
-              '[BOOTSTRAP] Forçando Recarga da Página para garantir Limpeza...');
           // Pequeno delay para garantir que os storages foram limpos
           await Future.delayed(const Duration(milliseconds: 100));
           html.window.location.reload();
@@ -237,8 +218,6 @@ class _BootstrapPageState extends State<BootstrapPage> {
         if (hasSession) {
           // Salvar SEMPRE, mesmo se vazio (root), para distinguir de "nunca salvou"
           await prefs.setString('app_slug', safeCurrentSlug);
-          print(
-              '💾 [BOOTSTRAP] Slug salvo para próximos refreshes: "$safeCurrentSlug"');
         }
       }
 
@@ -249,15 +228,11 @@ class _BootstrapPageState extends State<BootstrapPage> {
         // Se temos sessão válida e NÃO fizemos wipe, significa que o usuário
         // está logado na root e deu refresh -> Manter logado
         if (hasSession && !shouldWipe) {
-          print(
-              '✅ [BOOTSTRAP] Root com sessão válida. Recuperando slug salvo...');
           // Não retornamos antecipadamente. Deixamos cair na lógica abaixo.
           // O slug será recuperado do savedSlug.
         } else {
           // Caso contrário, navegar para login/home se não tiver slug
           if (slug.isEmpty) {
-            print(
-                'ℹ️ [BOOTSTRAP] Root sem sessão ou após wipe. Navegando para login...');
             _navegarParaHome();
             return;
           }
@@ -271,8 +246,6 @@ class _BootstrapPageState extends State<BootstrapPage> {
       if (finalSlug.isEmpty) {
         // Se não temos slug mas temos sessão, tentamos carregar permissões com o que temos (condominio_id salvo)
         if (hasSession) {
-          print(
-              '⚠️ [BOOTSTRAP] Slug vazio mas sessão válida. Tentando carregar permissões via storage...');
           await PermissionService().loadPermissions();
         }
 
@@ -298,9 +271,6 @@ class _BootstrapPageState extends State<BootstrapPage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'usuario_id': 1183}),
       );
-
-      print(
-          '🔍 [BOOTSTRAP] Session Response Status: ${sessaoResponse.statusCode}');
 
       if (sessaoResponse.statusCode != 200) {
         throw Exception(
@@ -350,9 +320,7 @@ class _BootstrapPageState extends State<BootstrapPage> {
         _statusMessage = 'Obtendo configurações do condomínio ($finalSlug)...';
       });
 
-      print('🔍 [BOOTSTRAP] Fetching Rota for: $finalSlug');
       final rotaUrl = '${ApiConfig.getEndpoint('config', 'rota')}/$finalSlug';
-      print('🔍 [BOOTSTRAP] Rota URL: $rotaUrl');
 
       final rotaResponse = await http.get(
         Uri.parse(rotaUrl),
@@ -361,8 +329,6 @@ class _BootstrapPageState extends State<BootstrapPage> {
           'Content-Type': 'application/json',
         },
       );
-
-      print('🔍 [BOOTSTRAP] Rota Response Status: ${rotaResponse.statusCode}');
 
       if (rotaResponse.statusCode != 200) {
         throw Exception(

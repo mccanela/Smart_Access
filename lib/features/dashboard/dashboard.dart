@@ -11,7 +11,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/crypto_utils.dart';
 import '../../core/config/api_config.dart';
 import '../../core/services/feedback_utils.dart';
-
+import 'services/encomenda_fetch_service.dart';
+import 'services/reference_data_service.dart';
+import 'services/delivery_pdf_service.dart';
 import '../../features/unidades/unidade_detalhe_screen.dart'
     hide
         isDarkMode,
@@ -29,16 +31,16 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../../core/services/image_utils.dart';
 import '../../core/services/permission_service.dart';
 import '../../core/theme/icon_colors.dart';
-
-import '../../core/services/signalr_service.dart';
-import '../../core/utils/file_download/file_download.dart';
-import 'services/delivery_pdf_service.dart';
-import '../../shared/widgets/character_counter_field.dart';
-import 'dashboard_isolate.dart';
-import 'dashboard_camera_panel.dart';
 import '../../shared/widgets/inline_period_picker.dart';
 import '../../shared/widgets/inline_single_date_picker.dart';
 import '../../core/utils/ui_standards.dart';
+import '../../core/services/signalr_service.dart';
+import '../../core/utils/file_download/file_download.dart';
+
+import '../../shared/widgets/character_counter_field.dart';
+import 'dashboard_isolate.dart';
+import 'dashboard_camera_panel.dart';
+
 import 'widgets/vertical_separator.dart';
 import 'widgets/floating_navigation_button.dart';
 import 'widgets/equipamentos_fab.dart';
@@ -48,8 +50,6 @@ import 'widgets/mini_segmented.dart';
 import 'widgets/transparent_icon_group.dart';
 import 'widgets/dashboard_small_widgets.dart';
 import '../modals/ocorrencias_modal.dart';
-import 'services/encomenda_fetch_service.dart';
-import 'services/reference_data_service.dart';
 
 part 'widgets/range_calendar_dialog.dart';
 part 'widgets/painel_selecao_convidados.dart';
@@ -68,7 +68,6 @@ part 'widgets/detalhes_entrega_panel.dart';
 Future<int> getCondominioIdAtual() async {
   // Prioridade 1: Pegar do SignalR se estiver disponível
   final signalRCondominioId = SignalRService().condominioId;
-  print('signalRCondominioId: $signalRCondominioId');
   if (signalRCondominioId != null && signalRCondominioId > 0) {
     return signalRCondominioId;
   }
@@ -202,6 +201,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final GlobalKey _panelEntradaSaidasKey = GlobalKey();
   String _feedbackMessageEntrada = '';
+  int _perfilId = 0; // Adicione junto às outras variáveis de estado
   @override
   void setState(VoidCallback fn) {
     if (!mounted) return;
@@ -312,6 +312,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int? _tabUnidades; // 0: Unidade, 1: Veículos, 2: Vagas
   int _tipoPessoa = 1; // 0: P. Serviá§o, 1: Visitante
   int _tabAvulsoAgendamentosSaidas = 0; // 0: Avulso, 1: Agendamentos, 2: Saídas
+  String _grupoEmFoco = 'EntradaSaidas';
 
   // Controle da navegaçao em tablets
   int _currentPage =
@@ -781,7 +782,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'fotoBase64': fotoBase64, // Foto obrigatória
       };
 
-      print('ðŸ“¤ Payload convidadoupd: $payloadUpd');
+      print(' Payload convidadoupd: $payloadUpd');
 
       final responseUpd = await http.post(
         urlUpd,
@@ -825,7 +826,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'dt_entrada': formattedDate,
       };
 
-      print('ðŸ“¤ Payload convidadomov: $payloadMov');
+      print(' Payload convidadomov: $payloadMov');
 
       final responseMov = await http.post(
         urlMov,
@@ -911,7 +912,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'dt_entrada': formattedDate,
       };
 
-      print('ðŸ“¤ Payload convidadomov (Re-entrada): $payloadMov');
+      print('Payload convidadomov (Re-entrada): $payloadMov');
 
       final responseMov = await http.post(
         urlMov,
@@ -1554,7 +1555,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // Debugging extra para identificar onde está o valor se ainda for null
           if (valorTxt == null) {
             print(
-                'âš ï¸ valor_txt ainda é null. Estrutura de data: ${data.runtimeType} -> $data');
+                'valor_txt ainda é null. Estrutura de data: ${data.runtimeType} -> $data');
           }
         }
 
@@ -1686,6 +1687,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _initializeData() async {
+    // Adicione a busca do perfil_id aqui
+    final prefs = await SharedPreferences.getInstance();
+    // Exemplo assumindo que o perfil está salvo como string (adapte se usar decryptText)
+    final perfilStr = prefs.getString('perfil_id') ?? '0';
+    if (mounted) {
+      setState(() {
+        _perfilId = int.tryParse(perfilStr) ?? 0;
+      });
+    }
+
     // 0. VERIFICAR PERMISSÕES E PLANO DO CONDOMÍNIO (CRÍTICO - CONTROL F5)
     await _verificarPlanoCondominio();
 
@@ -2368,7 +2379,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Página 2: ConectCon IA
 
     // Verificar permissões
-    final showEntrada =
+    bool showEntrada =
         PermissionService().hasPermission(40); // Registro de Entrada
     final showUnidades = PermissionService().hasPermission(32); // Unidades
 
@@ -2411,7 +2422,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildDesktopLayout() {
     // Verificar permissões
-    final showEntrada =
+    bool showEntrada =
         PermissionService().hasPermission(40); // Registro de Entrada
     final showUnidades = PermissionService().hasPermission(32); // Unidades
 
@@ -2645,10 +2656,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   'Saída de visitantes e colaboradores'
                 ],
                 selected: _tabAvulsoAgendamentosSaidas,
+                hasFocus: _grupoEmFoco == 'EntradaSaidas',
+                // --- 1. ENVIE A CONTAGEM PARA O BADGE NO ÍNDICE 1 ---
+                badges: {
+                  1: _agendamentos.length,
+                  2: _todasPassagens.length,
+                },
                 onChanged: (i) {
                   setState(() {
                     _tabAvulsoAgendamentosSaidas = i;
-
+                    _grupoEmFoco = 'EntradaSaidas'; // <- ADICIONE AQUI
                     if (i == 2) {
                       // Saídas - carregar API passagemhistorico
                       _fetchPassagens();
@@ -2673,7 +2690,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _unidadeAgendamento = null;
                       _convidadosResultados.clear();
                       _cardsExpandidos.clear();
-
+                      if (i == 1) {
+                        _fetchAgendamentos(isFiltro: false);
+                      }
                       _tipoFiltroEntrada = i;
                       // Limpar seleá§ões de espaá§os sociais ao mudar de tipo
                       if (i == 0) {
@@ -2703,6 +2722,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 },
                 color: const Color(0xFF00C853),
               ),
+
               const SizedBox(height: 12),
               Expanded(
                 child: _tabAvulsoAgendamentosSaidas == 2
@@ -2763,6 +2783,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _panelPassagens() {
+    return DashboardCard(
+      child: FocusScope(
+        canRequestFocus: true,
+        child: FocusTraversalGroup(
+          policy: WidgetOrderTraversalPolicy(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SegmentedTabBar(
+                labels: const ['Passagens'],
+                tooltips: const ['Passagem de usuários'],
+                selected: 0,
+                hasFocus: _grupoEmFoco == 'Passagens',
+                onChanged: (_) {
+                  setState(() {
+                    _grupoEmFoco = 'Passagens';
+                  });
+                },
+                color: const Color(0xFF2196F3), // Azul padrão
+              ),
+              const SizedBox(height: 12),
+              _passagensHistoricoContent(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
 // Adicionei o parâmetro condominioId na função chamadora
   Widget _panelOcorrencias() {
     return DashboardCard(
@@ -2777,7 +2827,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Column(
                   children: [
                     // Painel de unidades (expandido)
-                    Expanded(child: OcorrenciasScreen(onClose: () {})),
+                    Expanded(
+                      child: OcorrenciasScreen(
+                        onClose: () {},
+
+                        // --- ENCAIXE O GRUPO EM FOCO AQUI ---
+                        hasFocus: _grupoEmFoco == 'Ocorrencias',
+                        onFocusRequested: () {
+                          setState(() {
+                            _grupoEmFoco = 'Ocorrencias';
+                          });
+                        },
+                        // ------------------------------------
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -2813,7 +2876,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Widget para listar resultados da busca inline
+// Widget para listar resultados da busca inline
   Widget _buildListaConvidadosResultados() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // Filtrar lista baseado na aba selecionada para garantir isolamento absoluto
@@ -2834,6 +2897,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             convidado['pessoadocumento_id']?.toString() ??
             '';
 
+        // Verifica se há restrição no cadastro
+        final bool temRestricao =
+            convidado['lista_restricao']?.toString().toUpperCase() == 'S';
+
+        final motivolista_ds = convidado['motivolista_ds']?.toString() ?? '';
+        final tit_restricao = 'RESTRIÇÃO DE ACESSO NESTE CADASTRO';
+
         // Dados básicos
         final nome = convidado['nome'] ?? 'Nome não informado';
         final documento =
@@ -2853,9 +2923,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final data = (dtIni.isNotEmpty && dtFim.isNotEmpty)
             ? '$dtIni à $dtFim'
             : '$dtIni$dtFim';
+
         // PRIORIDADE DE FOTO:
-        // 1. link_foto (Se for URL oficial do banco)
-        // 2. foto (Se for base64 capturado ou mapeado anteriormente)
         String? fotoParaExibir = convidado['link_foto']?.toString();
         if (fotoParaExibir == null ||
             fotoParaExibir.isEmpty ||
@@ -2884,29 +2953,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
         bool jaDeuEntrada = entradaStr.isNotEmpty;
         bool jaDeuSaida = saidaStr.isNotEmpty;
 
+        // Define a cor da borda dando preferência à RESTRIÇÃO
         Color borderColor = getBorderColor(context);
-        if (jaDeuEntrada && !jaDeuSaida) {
+        if (temRestricao) {
+          borderColor = Colors.red.shade700;
+        } else if (temErroFoto) {
+          borderColor = Colors.red;
+        } else if (jaDeuEntrada && !jaDeuSaida) {
           borderColor = Colors.orange;
         } else if (jaDeuEntrada && jaDeuSaida) {
           borderColor = Colors.green;
         }
-        if (temErroFoto) {
-          borderColor = Colors.red;
+
+        // Define o fundo do card (destaque avermelhado em caso de restrição)
+        Color cardBgColor = getCardColor(context);
+        if (temRestricao) {
+          cardBgColor =
+              isDark ? const Color(0xFF3B181A) : const Color(0xFFFDE8E8);
         }
 
-        // Verificar se cartá£o está expandido
+        // Verificar se cartão está expandido
         final isExpanded = _cardsExpandidos.contains(uniqueKey);
 
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
           constraints: const BoxConstraints(minHeight: 100),
           decoration: BoxDecoration(
-            color: getCardColor(context),
+            color: cardBgColor,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: borderColor, width: temErroFoto ? 2 : 1),
+            border: Border.all(
+              color: borderColor,
+              width: (temRestricao || temErroFoto) ? 2.0 : 1.0,
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
+                color: temRestricao
+                    ? Colors.red.withOpacity(0.15)
+                    : Colors.black.withValues(alpha: 0.04),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
@@ -2915,6 +2998,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Badge/Alerta visual no topo do card caso haja restrição
+              if (temRestricao)
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade700,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(10),
+                      topRight: Radius.circular(10),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          color: Colors.white, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        tit_restricao,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               IntrinsicHeight(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2941,15 +3054,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         decoration: BoxDecoration(
                           color: isDark ? Colors.grey[850] : Colors.grey[100],
                           borderRadius: BorderRadius.only(
-                            topLeft: const Radius.circular(11),
+                            topLeft: Radius.circular(temRestricao ? 0 : 11),
                             bottomLeft: isExpanded
                                 ? Radius.zero
                                 : const Radius.circular(11),
                           ),
                         ),
                         child: ClipRRect(
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(11),
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(temRestricao ? 0 : 11),
                             bottomLeft: Radius.circular(11),
                           ),
                           child: _buildCardPhoto(fotoParaExibir, isDark,
@@ -3009,9 +3122,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      color: getTextColor(context),
+                                      color: temRestricao
+                                          ? (isDark
+                                              ? Colors.red.shade300
+                                              : Colors.red.shade900)
+                                          : getTextColor(context),
                                       fontSize: 14,
-                                      fontWeight: FontWeight.w500,
+                                      fontWeight: FontWeight.bold,
                                       letterSpacing: -0.5,
                                     ),
                                   ),
@@ -3078,7 +3195,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
 
-              // Seçao Expandida (Unidade e Autorizante)
+              // Seção Expandida (Unidade e Autorizante)
               if (isExpanded)
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -3109,7 +3226,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           setState(() {
                             if (val != null) {
                               _unidadeSelecionadaAvulso[uniqueKey] = val;
-                              // Auto-fill autorizante com o nome do morador/pessoa da unidade
                               final autorizanteController =
                                   _autorizanteAvulsoControllers.putIfAbsent(
                                       uniqueKey, () => TextEditingController());
@@ -3214,11 +3330,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               if (!isExpanded)
                 Padding(
-                  padding:
-                      const EdgeInsets.only(right: 16, bottom: 12, top: 12),
+                  padding: const EdgeInsets.only(
+                      left: 16, right: 16, bottom: 12, top: 12),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      // Lado Esquerdo: Exibição do Motivo da Restrição (se houver)
+                      Expanded(
+                        child: (temRestricao && motivolista_ds.isNotEmpty)
+                            ? Row(
+                                children: [
+                                  Icon(
+                                    Icons.error_outline,
+                                    size: 16,
+                                    color: isDark
+                                        ? Colors.red.shade300
+                                        : Colors.red.shade800,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      'Motivo: $motivolista_ds',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: isDark
+                                            ? Colors.red.shade300
+                                            : Colors.red.shade900,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+
+                      // Lado Direito: Grupo de Botões (Editar, Nova Entrada, etc)
                       TransparentIconGroup([
                         if (convidado['tipo'] == 'AG_EMPTY')
                           IconActionData(
@@ -3265,12 +3414,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     await registrarEntradaSaidaGlobal(
                                         reservaId, reservaconvidadoId, false);
                                 if (success) {
-                                  // 👇 AQUI COMEÇA O NOVO PADRÃO DE FEEDBACK 👇
                                   setState(() {
                                     _feedbackMessageEntrada =
                                         'Saída registrada com sucesso!';
 
-                                    // Atualiza a data e hora na interface imediatamente
                                     final agora = DateTime.now();
                                     final dataFormatada =
                                         '${agora.day.toString().padLeft(2, '0')}/${agora.month.toString().padLeft(2, '0')}/${agora.year} ${agora.hour.toString().padLeft(2, '0')}:${agora.minute.toString().padLeft(2, '0')}:${agora.second.toString().padLeft(2, '0')}';
@@ -3278,7 +3425,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     convidado['dt_saida'] = dataFormatada;
                                   });
 
-                                  // Some sozinho após 4 segundos
                                   Future.delayed(const Duration(seconds: 4),
                                       () {
                                     if (mounted) {
@@ -3287,17 +3433,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       });
                                     }
                                   });
-                                  // 👆 FIM DO NOVO PADRÃO 👆
                                 }
                               },
                               color: Colors.red,
                             ),
+                          // Botão Nova Entrada (Visível tanto para 'AV' quanto para 'AG')
                           if (!jaDeuEntrada)
                             IconActionData(
                               icon: Icons.login,
                               tooltip: 'Nova Entrada',
                               onPressed: () async {
-                                // Validar campos básicos
                                 final nomeVal = convidado['nome'] ??
                                     convidado['convidado_txt'];
                                 final docVal = convidado['documento'] ??
@@ -3313,7 +3458,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   return;
                                 }
 
-                                // Lógica de Foto
+                                // Validação de Foto antes da entrada
                                 String? fotoBase64 =
                                     convidado['foto']?.toString();
                                 bool fotoValida = fotoBase64 != null &&
@@ -3325,7 +3470,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   fotoValida = true;
                                 }
 
-                                // Verificar também link_foto (foto de perfil persistente)
                                 if (!fotoValida) {
                                   final linkFoto =
                                       convidado['link_foto']?.toString();
@@ -3336,7 +3480,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 }
 
                                 if (!fotoValida) {
-                                  // Capturar foto antes de expandir
                                   final globalContext =
                                       _dashboardContext ?? context;
                                   final result = await showDialog(
@@ -3361,8 +3504,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   }
                                 }
 
-                                // Lógica Agendamento vs Avulso
-                                if (convidado['tipo'] == 'AG') {
+                                // TRATAMENTO POR TIPO ('AG' vs 'AV')
+                                final tipo =
+                                    convidado['tipo']?.toString().toUpperCase();
+                                if (tipo == 'AG') {
                                   final entry = (convidado['entrada'] ??
                                           convidado['dt_entrada'] ??
                                           '')
@@ -3381,7 +3526,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     await _realizarEntradaDireta(convidado);
                                   }
                                 } else {
-                                  // Apenas expandir o card (não abrir form)
+                                  // Entrada Avulsa (AV) -> Expande o card para confirmação de unidade/autorizante
                                   setState(() {
                                     _cardsExpandidos.add(uniqueKey);
                                   });
@@ -3390,7 +3535,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               isMarked: true,
                               color: Colors.green,
                             ),
-                          // Botá£o Entrada com ášltimo Acesso - Dentro do grupo
                           if (!jaDeuEntrada &&
                               convidado['tipo'] != 'AG' &&
                               convidado['tipo'] != 'AG_EMPTY' &&
@@ -3410,7 +3554,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       .contains(uniqueKey)
                                   ? null
                                   : () async {
-                                      // Validar foto antes de registrar entrada
                                       String? fotoBase64 =
                                           convidado['foto']?.toString();
                                       bool fotoValida = fotoBase64 != null &&
@@ -3422,7 +3565,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         fotoValida = true;
                                       }
 
-                                      // Verificar também link_foto
                                       if (!fotoValida) {
                                         final linkFoto =
                                             convidado['link_foto']?.toString();
@@ -3434,7 +3576,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       }
 
                                       if (!fotoValida) {
-                                        // Capturar foto antes de registrar
                                         final globalContext =
                                             _dashboardContext ?? context;
                                         final result = await showDialog(
@@ -3460,10 +3601,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         }
                                       }
 
-                                      // Tentar encontrar o ID da unidade
                                       int unidadeId = 0;
 
-                                      // Primeiro, tentar pegar o unidade_id diretamente do convidado
                                       if (convidado['unidade_id'] != null) {
                                         unidadeId =
                                             convidado['unidade_id'] is int
@@ -3472,16 +3611,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                         convidado['unidade_id']
                                                             .toString()) ??
                                                     0;
-                                        print(
-                                            ' Unidade ID encontrado no convidado: $unidadeId');
                                       }
 
-                                      // Se não encontrou, buscar na lista de unidades
                                       if (unidadeId == 0) {
                                         try {
-                                          print(
-                                              'Buscando unidade "$unidade" na lista de ${_unidadesFiltroList.length} unidades');
-
                                           final unidadeObj =
                                               _unidadesFiltroList.firstWhere(
                                             (u) {
@@ -3516,11 +3649,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                         unidadeObj[
                                                             'unidade_id']) ??
                                                 0;
-                                            print(
-                                                ' Unidade encontrada: ${unidadeObj['unidade_mostra']} (ID: $unidadeId)');
-                                          } else {
-                                            print(
-                                                'Unidade não encontrada na lista');
                                           }
                                         } catch (e) {
                                           print(
@@ -3529,8 +3657,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       }
 
                                       if (unidadeId > 0) {
-                                        print(
-                                            'ðŸš€ Registrando entrada na unidade ID: $unidadeId');
                                         _registrarEntradaAvulsoSimples(
                                           convidado,
                                           unidadeId,
@@ -3540,8 +3666,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           loadingKey: uniqueKey,
                                         );
                                       } else {
-                                        print(
-                                            'Unidade ID não encontrado. Unidade: "$unidade"');
                                         FeedbackUtils.showWarning(
                                             context: context,
                                             title: 'Unidade não identificada',
@@ -4862,7 +4986,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _filtroUnidadeSaidasController.text.trim().isEmpty &&
         _filtroDataInicioSaidas == null &&
         _filtroDataFimSaidas == null) {
-      return [];
+      return _todasPassagens;
     }
 
     return _todasPassagens.where((passagem) {
@@ -5143,30 +5267,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // Painel 2 - Passagens
-  Widget _panelPassagens() {
-    return DashboardCard(
-      child: FocusScope(
-        canRequestFocus: true,
-        child: FocusTraversalGroup(
-          policy: WidgetOrderTraversalPolicy(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SegmentedTabBar(
-                labels: const ['Passagens'],
-                tooltips: const ['Passagem de usuários'],
-                selected: 0,
-                onChanged: (_) {},
-                color: const Color(0xFF2196F3), // Azul padrão
-              ),
-              const SizedBox(height: 12),
-              _passagensHistoricoContent(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _saidasList() {
     return Expanded(
@@ -6219,8 +6319,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               'Vagas do condomínio'
             ],
             selected: _tabUnidades!,
+            hasFocus: _grupoEmFoco == 'Unidades',
             onChanged: (i) {
-              setState(() => _tabUnidades = i);
+              setState(() {
+                _grupoEmFoco = 'Unidades'; // <- ADICIONE AQUI
+                _tabUnidades = i;
+              });
             },
             color: const Color(0xFF7C4DFF),
           ),
@@ -7131,7 +7235,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       final url =
-          Uri.parse('https://socialh.conectcon.net.br/pt-br/espacosociallist');
+          Uri.parse(ApiConfig.getEndpoint('condominio', 'espacosociallist'));
 
       final response = await http.post(
         url,
@@ -7160,6 +7264,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
 
         // Filtrar apenas itens onde ordem > 1
+        /*
         final filtrados = outros
             .where((item) {
               final ordemValue = item['ordem'];
@@ -7175,6 +7280,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             })
             .map((item) => Map<String, dynamic>.from(item))
             .toList();
+*/
+        final filtrados =
+            outros.map((item) => Map<String, dynamic>.from(item)).toList();
 
         // Verificar se existe "social" na resposta e se tem itens
         List<dynamic> social = [];
@@ -7204,17 +7312,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
 
         // Adicionar "Recarregamento Elétrico"
+        /*
         final recargaEletrica = {
           'ordem': 3,
           'espacopublico_id': -1, // Dummy ID para Recarregamento
           'espacopublico_ds': 'Recarga Veículo',
-          'flg_reserva': 'S',
+          'flg_reserva': 'K',
           'icone': 'Electric',
           'cpo_data': 1,
           'lblBtn_convidados': 'Convidado(s)',
           'max_convidado': 0,
         };
         filtrados.add(recargaEletrica);
+        */
 
         setState(() {
           _espacosSocialList = filtrados;
@@ -8331,6 +8441,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _fotoBase64 = null;
                         _fotoDocumentoBase64 = null;
                       });
+                      _limparFormulario();
                     },
                   ),
                 ]),
@@ -8674,7 +8785,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Icon(
                   _getIconData(icone),
 
-                  size: 26, // Reduzi levemente para caber melhor na altura 48
+                  size: 22, // Reduzi levemente para caber melhor na altura 48
 
                   color: isSelected
                       ? const Color(0xFF2E74FF)
@@ -9049,7 +9160,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       _loadingHistorico = true;
     });
-
+    print('_buscarHistoricoFiltrado');
     try {
       final prefs = await SharedPreferences.getInstance();
       final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
@@ -9201,7 +9312,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           : '';
 
       final url =
-          Uri.parse('https://gate.conectcon.net.br/pt-br/passagemhistorico');
+          Uri.parse(ApiConfig.getEndpoint('dashboard', 'historicoPassagem'));
 
       // Usar data atual por padrão, ou filtro se selecionado
       final hoje = DateTime.now();
@@ -9341,7 +9452,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'documento': documentoFiltro,
         'dt_ini': null,
         'dt_fim': null,
-        'tipoagendamento': 'S,H,M,A,K,',
+        'tipoagendamento': 'S,H,M,A,P,R,K,',
       };
 
       // Armazenar documento usado no filtro para destaque
@@ -9471,7 +9582,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       final url =
-          Uri.parse('https://socialh.conectcon.net.br/pt-br/espacosociallist');
+          Uri.parse(ApiConfig.getEndpoint('condominio', 'espacosociallist'));
 
       final response = await http.post(
         url,
@@ -16443,7 +16554,7 @@ const List<Map<String, String>> tiposAgendamentoFixos = [
   {'descricao': 'Prestador', 'codigo': 'P'},
   {'descricao': 'Espaá§o', 'codigo': 'S'},
   {'descricao': 'Reforma', 'codigo': 'R'},
-  {'descricao': 'Mudaná§a', 'codigo': 'M'},
+  {'descricao': 'Mudanças', 'codigo': 'M'},
 ];
 
 // Helper para mostrar unidade de forma simples

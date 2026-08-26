@@ -642,7 +642,18 @@ Widget _buildDivider(Color color) {
 
 class OcorrenciasScreen extends StatefulWidget {
   final VoidCallback onClose;
-  const OcorrenciasScreen({super.key, required this.onClose});
+
+  // --- ADICIONE ESTES DOIS PARÂMETROS ---
+  final bool hasFocus;
+  final VoidCallback onFocusRequested;
+  // --------------------------------------
+
+  const OcorrenciasScreen({
+    super.key,
+    required this.onClose,
+    this.hasFocus = false, // Padrão falso para não quebrar outras telas
+    required this.onFocusRequested, // Função obrigatória para avisar o Dashboard
+  });
 
   @override
   State<OcorrenciasScreen> createState() => _OcorrenciasScreenState();
@@ -779,13 +790,22 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
               'Histórico de ocorrências',
             ],
             selected: _tabOcorrencias,
-            onChanged: (i) => setState(() => _tabOcorrencias = i),
+            hasFocus: widget.hasFocus,
+            // 👇 ADICIONE A PROPRIEDADE BADGES AQUI 👇
+            badges: {
+              1: _historicoOcorrencias
+                  .length, // Substitua pelo nome real da sua lista
+            },
+            onChanged: (i) {
+              widget
+                  .onFocusRequested(); // <--- AVISA O DASHBOARD QUE FOI CLICADO
+              setState(() => _tabOcorrencias = i);
+            },
             color: const Color.fromARGB(204, 234, 177, 7),
           ),
-          SizedBox(height: 10),
+          const SizedBox(height: 10),
           Expanded(
             // Apenas aplica o Padding por fora, deixando o scroll para cada painel
-
             child: _tabOcorrencias == 0
                 ? SingleChildScrollView(child: _buildNovaOcorrenciaPanel())
                 : _buildHistoricoPanel(), // Se esse for um ListView, ele faz o próprio scroll
@@ -1072,196 +1092,205 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
   }
 
   Widget _buildHistoricoPanel() {
-    return Container(
-      padding:
-          const EdgeInsets.all(16.0), // Padding adicionado para respiro interno
-      decoration: BoxDecoration(
-        color: getFormGrisColor(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: getBorderColor(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          LayoutBuilder(builder: (context, constraints) {
-            return Autocomplete<Map<String, dynamic>>(
-              optionsBuilder: (TextEditingValue textEditingValue) {
-                if (textEditingValue.text.isEmpty) {
-                  return _unidades;
-                }
-                return _unidades.where((Map<String, dynamic> option) {
-                  final String optionString = (option['unidade_mostra'] ??
-                          option['unidade_ds'] ??
-                          option['nome'] ??
-                          option['id']?.toString() ??
-                          '')
-                      .toString()
-                      .toLowerCase();
-                  return optionString
-                      .contains(textEditingValue.text.toLowerCase());
-                });
-              },
-              displayStringForOption: (Map<String, dynamic> option) =>
-                  option['unidade_mostra'] ??
-                  option['unidade_ds'] ??
-                  option['nome'] ??
-                  option['id']?.toString() ??
-                  'Sem nome',
-              onSelected: (Map<String, dynamic> value) {
-                // Implementar filtro por unidade se necessário
-              },
-              fieldViewBuilder: (context, textEditingController, focusNode,
-                  onFieldSubmitted) {
-                return CharacterCounterField(
-                  controller: textEditingController,
-                  focusNode: focusNode,
-                  decoration: inputDecorationPadrao(
-                    context,
-                    labelText: 'Unidade',
-                  ).copyWith(
-                    suffixIcon: textEditingController.text.isNotEmpty
-                        ? IconButton(
-                            icon: Icon(Icons.close,
-                                size: 20,
-                                color: getSecondaryTextColor(context)),
-                            onPressed: () {
-                              textEditingController.clear();
-                            },
-                          )
-                        : const Icon(Icons.arrow_drop_down, color: Colors.grey),
-                  ),
-                );
-              },
-              optionsViewBuilder: (context, onSelected, options) {
-                return Align(
-                  alignment: Alignment.topLeft,
-                  child: Material(
-                    elevation: 4,
-                    borderRadius: BorderRadius.circular(8),
-                    color: getCardColor(context),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight: 200,
-                        maxWidth: constraints.maxWidth,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 1. CONTAINER DOS FILTROS
+        Container(
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            color: getFormGrisColor(context),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: getBorderColor(context)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              LayoutBuilder(builder: (context, constraints) {
+                return Autocomplete<Map<String, dynamic>>(
+                  optionsBuilder: (TextEditingValue textEditingValue) {
+                    if (textEditingValue.text.isEmpty) {
+                      return _unidades;
+                    }
+                    return _unidades.where((Map<String, dynamic> option) {
+                      final String optionString = (option['unidade_mostra'] ??
+                              option['unidade_ds'] ??
+                              option['nome'] ??
+                              option['id']?.toString() ??
+                              '')
+                          .toString()
+                          .toLowerCase();
+                      return optionString
+                          .contains(textEditingValue.text.toLowerCase());
+                    });
+                  },
+                  displayStringForOption: (Map<String, dynamic> option) =>
+                      option['unidade_mostra'] ??
+                      option['unidade_ds'] ??
+                      option['nome'] ??
+                      option['id']?.toString() ??
+                      'Sem nome',
+                  onSelected: (Map<String, dynamic> value) {
+                    // Implementar filtro por unidade se necessário
+                  },
+                  fieldViewBuilder: (context, textEditingController, focusNode,
+                      onFieldSubmitted) {
+                    return CharacterCounterField(
+                      controller: textEditingController,
+                      focusNode: focusNode,
+                      decoration: inputDecorationPadrao(
+                        context,
+                        labelText: 'Unidade',
+                      ).copyWith(
+                        suffixIcon: textEditingController.text.isNotEmpty
+                            ? IconButton(
+                                icon: Icon(Icons.close,
+                                    size: 20,
+                                    color: getSecondaryTextColor(context)),
+                                onPressed: () {
+                                  textEditingController.clear();
+                                },
+                              )
+                            : const Icon(Icons.arrow_drop_down,
+                                color: Colors.grey),
                       ),
-                      child: ListView.builder(
-                        padding: EdgeInsets.zero,
-                        shrinkWrap: true,
-                        itemCount: options.length,
-                        itemBuilder: (BuildContext context, int index) {
-                          final Map<String, dynamic> option =
-                              options.elementAt(index);
-                          return InkWell(
-                            onTap: () => onSelected(option),
-                            child: Container(
-                              padding: const EdgeInsets.all(16.0),
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  bottom: BorderSide(
-                                    color: getBorderColor(context)
-                                        .withValues(alpha: 0.5),
-                                    width: 0.5,
+                    );
+                  },
+                  optionsViewBuilder: (context, onSelected, options) {
+                    return Align(
+                      alignment: Alignment.topLeft,
+                      child: Material(
+                        elevation: 4,
+                        borderRadius: BorderRadius.circular(8),
+                        color: getCardColor(context),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight: 200,
+                            maxWidth: constraints.maxWidth,
+                          ),
+                          child: ListView.builder(
+                            padding: EdgeInsets.zero,
+                            shrinkWrap: true,
+                            itemCount: options.length,
+                            itemBuilder: (BuildContext context, int index) {
+                              final Map<String, dynamic> option =
+                                  options.elementAt(index);
+                              return InkWell(
+                                onTap: () => onSelected(option),
+                                child: Container(
+                                  padding: const EdgeInsets.all(16.0),
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      bottom: BorderSide(
+                                        color: getBorderColor(context)
+                                            .withValues(alpha: 0.5),
+                                        width: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    (option['unidade_mostra'] ??
+                                            option['unidade_ds'] ??
+                                            option['nome'] ??
+                                            option['id']?.toString() ??
+                                            'Sem nome')
+                                        .toString(),
+                                    style:
+                                        TextStyle(color: getTextColor(context)),
                                   ),
                                 ),
-                              ),
-                              child: Text(
-                                (option['unidade_mostra'] ??
-                                        option['unidade_ds'] ??
-                                        option['nome'] ??
-                                        option['id']?.toString() ??
-                                        'Sem nome')
-                                    .toString(),
-                                style: TextStyle(color: getTextColor(context)),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                );
-              },
-            );
-          }),
-          const SizedBox(height: 16),
-          InlinePeriodPicker(
-            startDate: _filtroDataInicio,
-            endDate: _filtroDataFim,
-            onClear: () => setState(() {
-              _filtroDataInicio = null;
-              _filtroDataFim = null;
-            }),
-            onRangeSelected: (start, end) {
-              setState(() {
-                _filtroDataInicio = start;
-                _filtroDataFim = end;
-              });
-              _carregarHistorico();
-            },
-            trailing: _buildTransparentIconGroup(
-              context,
-              [
-                {
-                  'icon': Icons.search,
-                  'color': IconColors.search(context),
-                  'tooltip': 'Buscar',
-                  'onPressed': () {
-                    _carregarHistorico();
-                  },
-                },
-                {
-                  'icon': Symbols.ink_eraser,
-                  'color': IconColors.delete(context),
-                  'tooltip': 'Limpar filtros',
-                  'onPressed': () {
-                    setState(() {
-                      _filtroDataInicio = null;
-                      _filtroDataFim = null;
-                    });
-                    _carregarHistorico();
-                  },
-                },
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: _loadingHistorico
-                ? AppLoading.loadingIndicator(
-                    message: 'Carregando histórico...')
-                : _historicoOcorrencias.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.history,
-                                size: 48,
-                                color: getSecondaryTextColor(context)),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Sem ocorrências registradas',
-                              style: TextStyle(
-                                color: getSecondaryTextColor(context),
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
+                              );
+                            },
+                          ),
                         ),
-                      )
-                    : ListView.builder(
-                        itemCount: _historicoOcorrencias.length,
-                        itemBuilder: (context, index) {
-                          final ocorrencia = _historicoOcorrencias[index];
-                          return _buildOcorrenciaItem(
-                            '${ocorrencia['nomeusu_intr'] ?? ''} - ${ocorrencia['unidadeusu_intr'] ?? ''} /${ocorrencia['prediousu_intr'] ?? ''} registrou em ${(ocorrencia['dt_ocorrencia'] ?? ocorrencia['data'] ?? '').split(' ').first}',
-                            ocorrencia['mensagem_txt'] ?? '',
-                            'Local: ${ocorrencia['local_txt'] ?? 'Não especificado'}',
-                          );
-                        },
                       ),
+                    );
+                  },
+                );
+              }),
+              const SizedBox(height: 16),
+              InlinePeriodPicker(
+                startDate: _filtroDataInicio,
+                endDate: _filtroDataFim,
+                onClear: () => setState(() {
+                  _filtroDataInicio = null;
+                  _filtroDataFim = null;
+                }),
+                onRangeSelected: (start, end) {
+                  setState(() {
+                    _filtroDataInicio = start;
+                    _filtroDataFim = end;
+                  });
+                  _carregarHistorico();
+                },
+                trailing: _buildTransparentIconGroup(
+                  context,
+                  [
+                    {
+                      'icon': Icons.search,
+                      'color': IconColors.search(context),
+                      'tooltip': 'Buscar',
+                      'onPressed': () {
+                        _carregarHistorico();
+                      },
+                    },
+                    {
+                      'icon': Symbols.ink_eraser,
+                      'color': IconColors.delete(context),
+                      'tooltip': 'Limpar filtros',
+                      'onPressed': () {
+                        setState(() {
+                          _filtroDataInicio = null;
+                          _filtroDataFim = null;
+                        });
+                        _carregarHistorico();
+                      },
+                    },
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+
+        // 2. ESPAÇAMENTO ENTRE FILTROS E RESULTADOS
+        const SizedBox(height: 12),
+
+        // 3. LISTA DE OCORRÊNCIAS
+        Expanded(
+          child: _loadingHistorico
+              ? AppLoading.loadingIndicator(message: 'Carregando histórico...')
+              : _historicoOcorrencias.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.history,
+                              size: 48, color: getSecondaryTextColor(context)),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Sem ocorrências registradas',
+                            style: TextStyle(
+                              color: getSecondaryTextColor(context),
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _historicoOcorrencias.length,
+                      itemBuilder: (context, index) {
+                        final ocorrencia = _historicoOcorrencias[index];
+                        return _buildOcorrenciaItem(
+                          '${ocorrencia['nomeusu_intr'] ?? ''} - ${ocorrencia['unidadeusu_intr'] ?? ''} /${ocorrencia['prediousu_intr'] ?? ''} registrou em ${(ocorrencia['dt_ocorrencia'] ?? ocorrencia['data'] ?? '').split(' ').first}',
+                          ocorrencia['mensagem_txt'] ?? '',
+                          'Local: ${ocorrencia['local_txt'] ?? 'Não especificado'}',
+                        );
+                      },
+                    ),
+        ),
+      ],
     );
   }
 
@@ -1314,14 +1343,14 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
               children: [
                 Text(date,
                     style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 12,
                         color: getSecondaryTextColor(context),
                         fontWeight: FontWeight.w500)),
-                const SizedBox(height: 6),
+                const SizedBox(height: 10),
                 Text(title,
                     style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
                         color: getTextColor(context))),
                 if (author.isNotEmpty) ...[
                   const SizedBox(height: 4),

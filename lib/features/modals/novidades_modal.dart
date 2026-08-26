@@ -1,11 +1,112 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../core/utils/ui_standards.dart';
 import '../../core/config/app_version.dart';
 import '../../shared/widgets/screen_header.dart';
+import '../../core/config/api_config.dart';
+import '../../core/services/crypto_utils.dart';
 
-class NovidadesModal extends StatelessWidget {
+class NovidadesModal extends StatefulWidget {
   final VoidCallback? onClose;
   const NovidadesModal({super.key, this.onClose});
+
+  @override
+  State<NovidadesModal> createState() => _NovidadesModalState();
+}
+
+class _NovidadesModalState extends State<NovidadesModal> {
+  bool _isLoading = true;
+  String _errorMessage = '';
+  List<Map<String, dynamic>> _versoes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchNovidades();
+  }
+
+  Future<void> _fetchNovidades() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
+      final tokenSessao =
+          encryptedToken.isNotEmpty ? decryptText(encryptedToken) : '';
+
+      final url = Uri.parse('${ApiConfig.socialhUrl}/avisolist');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $tokenSessao',
+        },
+        body: jsonEncode({'condominio_id': 0, 'aviso_id': 10994005}),
+      );
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+
+        // Caminho ajustado para buscar dentro de data -> avisoCondominio
+        final List<dynamic> listaApi =
+            decoded['data']?['avisoCondominio'] ?? [];
+
+        setState(() {
+          _versoes = List<Map<String, dynamic>>.from(listaApi);
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage =
+              'Erro ao carregar novidades (Status: ${response.statusCode})';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Não foi possível conectar ao servidor.';
+        _isLoading = false;
+      });
+    }
+  }
+
+  // Função auxiliar para converter o texto em HTML para texto simples formatado
+  String _limparHtml(String htmlString) {
+    if (htmlString.isEmpty) return '';
+
+    // Substitui quebras de linha HTML por quebras reais
+    String parsed =
+        htmlString.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
+
+    // Substitui parágrafos e títulos por quebras de linha
+    parsed = parsed.replaceAll(
+        RegExp(r'</p>|<p>|</h1>|</h2>|</h3>|<ul>|</ul>|<ol>|</ol>',
+            caseSensitive: false),
+        '\n');
+
+    // Transforma itens de lista em "bullets" nativos
+    parsed = parsed.replaceAll(RegExp(r'<li>', caseSensitive: false), '• ');
+    parsed = parsed.replaceAll(RegExp(r'</li>', caseSensitive: false), '\n');
+
+    // Remove todas as tags restantes (ex: <b>, <i>, <blockquote>)
+    parsed = parsed.replaceAll(RegExp(r'<[^>]*>'), '');
+
+    // Decodifica entidades HTML comuns
+    parsed = parsed
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'");
+
+    // Remove quebras de linha triplas ou maiores geradas pelo replace
+    parsed = parsed.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+
+    return parsed.trim();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,59 +125,72 @@ class NovidadesModal extends StatelessWidget {
       child: Column(
         children: [
           ScreenHeader(
-            icon: Icons.new_releases_rounded,
-            title: 'Novidades',
-            onClose: onClose ?? () => Navigator.of(context).pop(),
+            icon: Icons.whatshot,
+            title: 'Versões',
+            onClose: widget.onClose ?? () => Navigator.of(context).pop(),
           ),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(32),
-              children: [
-                _buildVersionSection(
-                  context,
-                  version: '2.0.0',
-                  date: '01/06/2026',
-                  items: [
-                    _ChangeItem(
-                      icon: Icons.system_update,
-                      title: 'Atualização automática',
-                      description:
-                          'O sistema agora atualiza automaticamente quando uma nova versão é publicada.',
-                    ),
-                    _ChangeItem(
-                      icon: Icons.info_outline,
-                      title: 'Versão na sidebar',
-                      description:
-                          'A versão atual do sistema agora aparece na barra lateral.',
-                    ),
-                    _ChangeItem(
-                      icon: Icons.touch_app,
-                      title: 'Tooltips nos botões',
-                      description:
-                          'Todos os botões do dashboard agora exibem descrição ao passar o mouse.',
-                    ),
-                    _ChangeItem(
-                      icon: Icons.palette_outlined,
-                      title: 'Padronização visual',
-                      description:
-                          'Todas as telas laterais agora seguem o mesmo padrão de cores do dashboard.',
-                    ),
-                    _ChangeItem(
-                      icon: Icons.local_shipping_outlined,
-                      title: 'Entrega de encomendas',
-                      description:
-                          'Fluxo de entrega integrado com confirmação e feedback visual.',
-                    ),
-                    _ChangeItem(
-                      icon: Icons.qr_code,
-                      title: 'Identificação interna automática',
-                      description:
-                          'Número aleatório gerado automaticamente em cada nova encomenda.',
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _errorMessage.isNotEmpty
+                    ? Center(
+                        child: Text(
+                          _errorMessage,
+                          style:
+                              TextStyle(color: getSecondaryTextColor(context)),
+                        ),
+                      )
+                    : _versoes.isEmpty
+                        ? Center(
+                            child: Text(
+                              'Nenhuma novidade encontrada.',
+                              style: TextStyle(
+                                  color: getSecondaryTextColor(context)),
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(32),
+                            itemCount: _versoes.length,
+                            itemBuilder: (context, index) {
+                              final versaoDados = _versoes[index];
+
+                              // Extração com base no novo JSON
+                              final titulo =
+                                  versaoDados['titulo_txt'] ?? 'Atualização';
+                              final dateStr = versaoDados['dt_reg_br'] ?? '';
+                              final rawHtml = versaoDados['texto_txt'] ?? '';
+
+                              final textoLimpo = _limparHtml(rawHtml);
+
+                              // Tentar extrair a versão do próprio HTML (ex: "Novidades 3.0.0")
+                              String versionStr = '3.0.0';
+                              final versionMatch = RegExp(
+                                      r'Novidades\s+([0-9]+\.[0-9]+\.[0-9]+)',
+                                      caseSensitive: false)
+                                  .firstMatch(rawHtml);
+                              if (versionMatch != null &&
+                                  versionMatch.groupCount >= 1) {
+                                versionStr = versionMatch.group(1)!;
+                              }
+
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 24),
+                                child: _buildVersionSection(
+                                  context,
+                                  version: versionStr,
+                                  date: dateStr,
+                                  items: [
+                                    _ChangeItem(
+                                      icon: Icons
+                                          .auto_awesome, // Ícone padrão para a caixa de novidades
+                                      title: titulo,
+                                      description: textoLimpo,
+                                    )
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
           ),
         ],
       ),
@@ -133,25 +247,6 @@ class NovidadesModal extends StatelessWidget {
                   fontSize: 13,
                 ),
               ),
-              if (isCurrent) ...[
-                const Spacer(),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF22C55E).withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text(
-                    'Atual',
-                    style: TextStyle(
-                      color: Color(0xFF22C55E),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
             ],
           ),
           const SizedBox(height: 20),
@@ -175,7 +270,7 @@ class NovidadesModal extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
-              item.icon,
+              Icons.turned_in,
               size: 18,
               color: const Color(0xFF684F8E),
             ),

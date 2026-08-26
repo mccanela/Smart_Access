@@ -6,6 +6,7 @@ import 'package:pdfx/pdfx.dart';
 //-----------------------------//
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
+import 'dart:ui_web' as ui_web;
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_html/flutter_html.dart';
@@ -17,6 +18,7 @@ import '../../core/localization/app_localizations.dart';
 import '../../main.dart';
 import '../../shared/widgets/screen_header.dart';
 import '../../shared/widgets/character_counter_field.dart';
+import 'aviso_expandable_item.dart';
 import '../../shared/widgets/expandable_tabs.dart';
 import '../../core/utils/ui_standards.dart';
 
@@ -434,15 +436,19 @@ class _CondominioModalState extends State<CondominioModal>
 
         // === NOVO: Baixar e preparar o PDF para exibição ===
         if (_urlRegimento != null && _urlRegimento!.isNotEmpty) {
-          try {
-            final pdfResponse = await http.get(Uri.parse(_urlRegimento!));
-            if (pdfResponse.statusCode == 200) {
-              _pdfController = PdfController(
-                document: PdfDocument.openData(pdfResponse.bodyBytes),
-              );
+          if (kIsWeb) {
+            // Na web usaremos IFrame nativo, evitando erro de CORS
+          } else {
+            try {
+              final pdfResponse = await http.get(Uri.parse(_urlRegimento!));
+              if (pdfResponse.statusCode == 200) {
+                _pdfController = PdfController(
+                  document: PdfDocument.openData(pdfResponse.bodyBytes),
+                );
+              }
+            } catch (e) {
+              print('Erro ao carregar os bytes do PDF: $e');
             }
-          } catch (e) {
-            print('Erro ao carregar os bytes do PDF: $e');
           }
         }
 
@@ -1021,9 +1027,7 @@ class _CondominioModalState extends State<CondominioModal>
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_urlRegimento == null ||
-        _urlRegimento!.isEmpty ||
-        _pdfController == null) {
+    if (_urlRegimento == null || _urlRegimento!.isEmpty) {
       return const Center(
         child: Text(
           'Regimento interno não disponível',
@@ -1032,13 +1036,40 @@ class _CondominioModalState extends State<CondominioModal>
       );
     }
 
-    // PDF embutido nativamente com o pacote pdfx!
+    if (kIsWeb) {
+      // Registra o IFrame para exibir o PDF na Web
+      final String viewId = 'pdf-iframe-${_urlRegimento.hashCode}';
+
+      ui_web.platformViewRegistry.registerViewFactory(
+        viewId,
+        (int viewId) => html.IFrameElement()
+          ..src = _urlRegimento!
+          ..style.border = 'none'
+          ..style.width = '100%'
+          ..style.height = '100%',
+      );
+
+      return Container(
+        color: isDarkMode(context) ? const Color(0xFF1E1E1E) : Colors.white,
+        child: HtmlElementView(viewType: viewId),
+      );
+    }
+
+    // PDF embutido nativamente com o pacote pdfx para mobile
+    if (_pdfController == null) {
+      return const Center(
+        child: Text(
+          'Erro ao carregar o PDF',
+          style: TextStyle(color: Colors.grey),
+        ),
+      );
+    }
+
     return Container(
       color: isDarkMode(context) ? const Color(0xFF1E1E1E) : Colors.white,
       child: PdfView(
         controller: _pdfController!,
-        scrollDirection:
-            Axis.vertical, // Permite rolar o PDF para cima e para baixo
+        scrollDirection: Axis.vertical,
       ),
     );
   }
@@ -1057,7 +1088,26 @@ class _CondominioModalState extends State<CondominioModal>
       );
     }
 
-    // Embutindo a Imagem nativamente com suporte a Zoom (movimento de pinça)
+    if (kIsWeb) {
+      // Registra o IFrame para exibir o Mapa de Vagas na Web
+      final String viewId = 'mapa-iframe-${_urlMapaGaragem.hashCode}';
+
+      ui_web.platformViewRegistry.registerViewFactory(
+        viewId,
+        (int viewId) => html.IFrameElement()
+          ..src = _urlMapaGaragem!
+          ..style.border = 'none'
+          ..style.width = '90%'
+          ..style.height = '100%',
+      );
+
+      return Container(
+        color: isDarkMode(context) ? const Color(0xFF1E1E1E) : Colors.white,
+        child: HtmlElementView(viewType: viewId),
+      );
+    }
+
+    // Embutindo a Imagem nativamente com suporte a Zoom para mobile
     return Container(
       color: isDarkMode(context) ? const Color(0xFF1E1E1E) : Colors.white,
       child: InteractiveViewer(
@@ -1238,100 +1288,7 @@ class _CondominioModalState extends State<CondominioModal>
             separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final aviso = _avisosFiltered[index];
-              final isDestaque = aviso['flg_destaque'] == 'S';
-              final titulo = aviso['titulo_txt'] ?? 'Sem título';
-              final data = aviso['dt_reg_br'] ?? '';
-              final enviadoPor = aviso['enviado_por'] ?? 'Não informado';
-
-              return MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: () => _visualizarAviso(aviso),
-                  child: Card(
-                    color: getCardColor(context),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(
-                        color: isDestaque
-                            ? Colors.orange
-                            : getBorderColor(context),
-                        width: isDestaque ? 2 : 1,
-                      ),
-                    ),
-                    elevation: 0,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  titulo,
-                                  style: _tsTitle(context).copyWith(
-                                    color: isDestaque
-                                        ? Colors.orange
-                                        : getTextColor(context),
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (isDestaque)
-                                Container(
-                                  margin: const EdgeInsets.only(left: 8),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: const Text(
-                                    'DESTAQUE',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.calendar_today,
-                                size: 14,
-                                color: getSecondaryTextColor(context),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(data, style: _tsCaption(context)),
-                              const SizedBox(width: 16),
-                              Icon(
-                                Icons.person,
-                                size: 14,
-                                color: getSecondaryTextColor(context),
-                              ),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  'Enviado por: $enviadoPor',
-                                  style: _tsCaption(context),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
+              return AvisoExpandableItem(avisoInicial: aviso);
             },
           ),
         ),
@@ -1339,461 +1296,10 @@ class _CondominioModalState extends State<CondominioModal>
     );
   }
 
-  void _visualizarAviso(Map<String, dynamic> aviso) async {
-    // Não setar loading aqui para evitar "pisca"
-    try {
-      final condominioId = await ApiConfig.getCondominioId();
-      final headers = await ApiConfig.getDefaultHeaders();
-      final avisoId = aviso['aviso_id'];
-
-      final response = await http.post(
-        Uri.parse('https://socialh.conectcon.net.br/pt-br/avisolist'),
-        headers: headers,
-        body: jsonEncode({'aviso_id': avisoId, 'condominio_id': condominioId}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['status'] == 200) {
-          final avisoDetalhes = data['data']?['avisoCondominio']?[0];
-          if (avisoDetalhes != null) {
-            _abrirPainelAvisoDetalhes(avisoDetalhes);
-          } else {
-            // Fallback: usar dados básicos se API não retornar dados
-            _abrirPainelAvisoDetalhes(aviso);
-          }
-        } else {
-          // Fallback: usar dados básicos se status não for 200
-          _abrirPainelAvisoDetalhes(aviso);
-        }
-      } else {
-        // Fallback: usar dados básicos se response não for 200
-        _abrirPainelAvisoDetalhes(aviso);
-      }
-    } catch (e) {
-      // Em caso de erro, mostrar os dados básicos
-      _abrirPainelAvisoDetalhes(aviso);
-    }
-  }
-
-  void _abrirPainelAvisoDetalhes(Map<String, dynamic> aviso) {
-    // Criar OverlayEntry para mostrar o painel lateral
-    late OverlayEntry overlay;
-    overlay = OverlayEntry(
-      builder: (context) => Positioned(
-        right: 0,
-        top: 0,
-        bottom: 0,
-        child: AvisoDetalhesPanel(
-          aviso: aviso,
-          onClose: () {
-            overlay.remove();
-          },
-        ),
-      ),
-    );
-
-    // Inserir o overlay no contexto atual
-    Overlay.of(context).insert(overlay);
-  }
 }
 
 //-----------------------------//
 // AVISO DETALHES PANEL - PÁGINA LATERAL
-//-----------------------------//
-
-class AvisoDetalhesPanel extends SidePanel {
-  final Map<String, dynamic> aviso;
-
-  const AvisoDetalhesPanel({
-    super.key,
-    required super.onClose,
-    required this.aviso,
-  });
-
-  @override
-  String get panelKey => 'aviso_detalhes';
-
-  @override
-  State<AvisoDetalhesPanel> createState() => _AvisoDetalhesPanelState();
-}
-
-class _AvisoDetalhesPanelState extends State<AvisoDetalhesPanel> {
-  // Funções auxiliares para cores adaptáveis ao tema
-  bool isDarkMode(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark;
-  }
-
-  Color getBackgroundColor(BuildContext context) {
-    return isDarkMode(context) ? Colors.black : Colors.white;
-  }
-
-  Color getSurfaceColor(BuildContext context) {
-    return isDarkMode(context) ? const Color(0xFF374151) : Colors.white;
-  }
-
-  Color getCardColor(BuildContext context) {
-    return isDarkMode(context)
-        ? const Color.fromARGB(255, 40, 40, 40)
-        : const Color(0xFFF8F9FB);
-  }
-
-  Color getTextColor(BuildContext context) {
-    return isDarkMode(context) ? Colors.white : Colors.black;
-  }
-
-  Color getSecondaryTextColor(BuildContext context) {
-    return isDarkMode(context) ? Colors.grey[300]! : const Color(0xFF6B7280);
-  }
-
-  Color getBorderColor(BuildContext context) {
-    return isDarkMode(context) ? Colors.grey[600]! : Colors.grey.shade300;
-  }
-
-  // Estilos de texto padronizados
-  TextStyle _tsTitle(BuildContext context) => TextStyle(
-        fontFamily: 'Inter',
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-        color: isDarkMode(context) ? Colors.white : const Color(0xFF101828),
-      );
-
-  TextStyle _tsBody(BuildContext context) => TextStyle(
-        fontFamily: 'Inter',
-        fontSize: 13,
-        fontWeight: FontWeight.w400,
-        color:
-            isDarkMode(context) ? Colors.grey[300]! : const Color(0xFF667085),
-      );
-
-  TextStyle _tsSectionTitle(BuildContext context) => TextStyle(
-        fontFamily: 'Inter',
-        fontSize: 16,
-        fontWeight: FontWeight.w700,
-        color: isDarkMode(context) ? Colors.white : const Color(0xFF101828),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final isDestaque = widget.aviso['flg_destaque'] == 'S';
-
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        width: (MediaQuery.of(context).size.width * 0.5).clamp(320.0, 1000.0),
-        height: double.infinity,
-        decoration: BoxDecoration(
-          color: getBackgroundColor(context),
-        ),
-        child: Column(
-          children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: getCardColor(context),
-                border: Border(
-                  bottom: BorderSide(
-                    color: getBorderColor(context),
-                    width: 1,
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                widget.aviso['titulo_txt'] ??
-                                    'Detalhes do Aviso',
-                                style: _tsSectionTitle(context),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (isDestaque)
-                              Container(
-                                margin: const EdgeInsets.only(left: 8),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Text(
-                                  'DESTAQUE',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: widget.onClose,
-                    icon: const Icon(Icons.close),
-                    color: getTextColor(context),
-                  ),
-                ],
-              ),
-            ),
-
-            // Content
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Informações do aviso
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: getCardColor(context),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: getBorderColor(context)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.calendar_today,
-                                  size: 16,
-                                  color: getSecondaryTextColor(context)),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Data: ${widget.aviso['dt_reg_br'] ?? 'Não informado'}',
-                                style: _tsBody(context),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Icon(Icons.person,
-                                  size: 16,
-                                  color: getSecondaryTextColor(context)),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Enviado por: ${widget.aviso['enviado_por'] ?? 'Não informado'}',
-                                style: _tsBody(context),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // Conteúdo do aviso
-                    Text(
-                      'Conteúdo do Aviso',
-                      style: _tsTitle(context),
-                    ),
-                    const SizedBox(height: 12),
-
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: getCardColor(context),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: getBorderColor(context)),
-                      ),
-                      child:
-                          _buildConteudoAviso(widget.aviso['texto_txt'] ?? ''),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildConteudoAviso(String textoHtml) {
-    // Se não há conteúdo HTML, mostrar mensagem
-    if (textoHtml.trim().isEmpty) {
-      return Text(
-        'Conteúdo não disponível',
-        style: _tsBody(context),
-      );
-    }
-
-    // Coletar URLs das imagens
-    final imagens = <String>[];
-    final imgRegex =
-        RegExp(r'<img[^>]+src="([^"]+)"[^>]*>', caseSensitive: false);
-    final matches = imgRegex.allMatches(textoHtml);
-
-    for (final match in matches) {
-      imagens.add(match.group(1)!);
-    }
-
-    // Remover tags <img> do HTML
-    final htmlSemImagens = textoHtml.replaceAll(imgRegex, '');
-
-    // Removemos temporariamente todas as tags do HTML apenas para checar se sobrou algum texto real.
-    final textoReal = htmlSemImagens.replaceAll(RegExp(r'<[^>]*>'), '').trim();
-
-    // Lista de widgets para combinar HTML + botões de imagem
-    final widgets = <Widget>[];
-
-    // Adicionar HTML renderizado APENAS se existir algum texto real para mostrar
-    if (textoReal.isNotEmpty) {
-      widgets.add(
-        Html(
-          data: htmlSemImagens,
-          style: {
-            "p": Style(
-              fontSize: FontSize(15),
-              color: getTextColor(context),
-              margin: Margins.only(bottom: 10),
-              lineHeight: LineHeight(1.4),
-            ),
-            "b": Style(
-              fontWeight: FontWeight.bold,
-              color: getTextColor(context),
-            ),
-            "strong": Style(
-              fontWeight: FontWeight.bold,
-              color: getTextColor(context),
-            ),
-            "a": Style(
-              color: Colors.blue,
-              textDecoration: TextDecoration.underline,
-              textDecorationColor: Colors.blue,
-            ),
-            "h4": Style(
-              fontSize: FontSize.large,
-              fontWeight: FontWeight.w600,
-              color: getTextColor(context),
-              margin: Margins.only(top: 12, bottom: 8),
-            ),
-            "h3": Style(
-              fontSize: FontSize(18),
-              fontWeight: FontWeight.w600,
-              color: getTextColor(context),
-              margin: Margins.only(top: 12, bottom: 8),
-            ),
-            "h2": Style(
-              fontSize: FontSize(20),
-              fontWeight: FontWeight.w600,
-              color: getTextColor(context),
-              margin: Margins.only(top: 12, bottom: 8),
-            ),
-            "h1": Style(
-              fontSize: FontSize(22),
-              fontWeight: FontWeight.w700,
-              color: getTextColor(context),
-              margin: Margins.only(top: 12, bottom: 8),
-            ),
-            "br": Style(
-              margin: Margins.only(bottom: 4),
-            ),
-            "div": Style(
-              margin: Margins.only(bottom: 8),
-            ),
-            "span": Style(
-              color: getTextColor(context),
-            ),
-          },
-          onLinkTap: (url, _, __) {
-            if (url != null) {
-              _abrirUrl(url);
-            }
-          },
-        ),
-      );
-    }
-
-    // Adicionar botões para cada imagem (padrão dashboard)
-    for (final src in imagens) {
-      widgets.add(
-        Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min, // Remove o espaço extra vertical
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.only(bottom: 8.0),
-                child: Text(
-                  "Clique no botão abaixo para abrir a mensagem",
-                  style: TextStyle(
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-              Material(
-                color: Colors.transparent,
-                child: _buildTransparentIconGroup(
-                  context,
-                  [
-                    {
-                      'icon': Icons.image,
-                      'tooltip': 'Ver imagem',
-                      'onPressed': () => _abrirUrl(src),
-                    },
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: widgets,
-    );
-  }
-
-  void _abrirUrl(String url) async {
-    String urlCompleta = url;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      // Se for URL relativa, tornar absoluta
-      if (url.startsWith('/')) {
-        urlCompleta = 'https://socialh.conectcon.net.br$url';
-      } else {
-        urlCompleta = 'https://socialh.conectcon.net.br/$url';
-      }
-    }
-
-    try {
-      if (kIsWeb) {
-        html.window.open(urlCompleta, '_blank');
-      } else {
-        final uri = Uri.parse(urlCompleta);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
-      }
-    } catch (e) {
-      // Silently fail if URL cannot be opened
-      debugPrint('Erro ao abrir URL: $e');
-    }
-  }
-}
-
-//-----------------------------//
-// CONDOMINIO PANEL - PÁGINA LATERAL (WRAPPER)
 //-----------------------------//
 
 class CondominioPanel extends SidePanel {

@@ -8,14 +8,18 @@ class SegmentedTabBar extends StatelessWidget {
   final Color color;
   final List<String>? tooltips;
 
-  const SegmentedTabBar({
-    super.key,
-    required this.labels,
-    required this.selected,
-    required this.onChanged,
-    required this.color,
-    this.tooltips,
-  });
+  // 1. Nova propriedade para indicar se esta TabBar é a ativa no momento
+  final bool hasFocus;
+  final Map<int, int>? badges;
+  const SegmentedTabBar(
+      {super.key,
+      required this.labels,
+      required this.selected,
+      required this.onChanged,
+      required this.color,
+      this.tooltips,
+      this.hasFocus = false,
+      this.badges});
 
   @override
   Widget build(BuildContext context) {
@@ -49,16 +53,27 @@ class SegmentedTabBar extends StatelessWidget {
                         const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(10),
-                      color: selected == i ? segmentColor : Colors.transparent,
+
+                      // --- ALTERADO AQUI: Fundo do item escolhido ---
+                      color: selected == i
+                          ? (hasFocus ? const Color(0xFF9598AA) : segmentColor)
+                          : Colors.transparent,
+                      // ----------------------------------------------
+
+                      border: Border.all(color: Colors.transparent, width: 2),
+
+                      // --- ALTERADO AQUI: Sombra combinando com a nova cor ---
                       boxShadow: selected == i
                           ? [
                               BoxShadow(
-                                color: segmentColor.withValues(alpha: 0.3),
+                                color: const Color(0xFF2C3138)
+                                    .withValues(alpha: 0.3),
                                 blurRadius: 8,
                                 offset: const Offset(0, 4),
                               ),
                             ]
                           : [],
+                      // -------------------------------------------------------
                     ),
                     child: Center(
                       child: Row(
@@ -86,6 +101,30 @@ class SegmentedTabBar extends StatelessWidget {
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+
+                            // ---------------------------------------
+                          ],
+                          // --- ADICIONE O CÓDIGO DO BADGE AQUI ---
+                          if (badges != null &&
+                              badges!.containsKey(i) &&
+                              badges![i]! > 0) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.red, // Fundo vermelho
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                badges![i]!.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white, // Fonte branca
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                           ],

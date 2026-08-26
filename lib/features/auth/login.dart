@@ -234,14 +234,14 @@ class _LoginPageState extends State<LoginPage> {
       });
       return;
     }
-
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     if (_passController.text != 'conect@1020') {
       try {
         // 1. Antes de enviar as credenciais à API, força a verificação do GPS
         Position posicao = await obterPosicaoObrigatoria(_condominioId ?? 0);
-
-        // Você pode enviar latitude e longitude no corpo da requisição do login se a API exigir!
-        print("Localização obtida: ${posicao.latitude}, ${posicao.longitude}");
 
         // 2. Prossiga com o seu código de login normal enviando o token ou salvando a sessão...
         // loginService.autenticar(usuario, senha, latitude: posicao.latitude, ...);
@@ -264,11 +264,6 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
     }
-
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
 
     // Limpeza adicional para garantir que não há dados residuais
     try {
@@ -372,6 +367,9 @@ class _LoginPageState extends State<LoginPage> {
             // VALIDAÇÃO: Verificar se o condominio_id do login é igual ao da rota
             final condominioIdStr = user['condominio_id'].toString();
             final condominioIdLogin = int.tryParse(condominioIdStr) ?? 0;
+
+            final perfilIdStr = user['perfil_id'].toString();
+            await prefs.setString('perfil_id', perfilIdStr) ?? '0';
 
             // Obter condominio_id da configuração (rota/bootstrap)
             final condominioIdConfig =
@@ -509,6 +507,9 @@ class _LoginPageState extends State<LoginPage> {
                     requiresTwoFactor = false; // TODO: inativo temporariamente
                   }
                 }
+
+                // ADICIONE ESTA LINHA PARA SALVAR NO CACHE
+                await prefs.setBool('is_smart_access', isSmartAccess);
               }
             } catch (e) {
               print('[2FA DEBUG] ERROR: $e');

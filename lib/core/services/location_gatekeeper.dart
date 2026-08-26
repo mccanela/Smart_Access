@@ -48,6 +48,10 @@ Future<Position> obterPosicaoObrigatoria(int condominioId) async {
 
   Position posicao = await Geolocator.getCurrentPosition();
 
+  // Você pode enviar latitude e longitude no corpo da requisição do login se a API exigir!
+  print(
+      "getCurrentPosition - latitude: ${posicao.latitude}, longitude: ${posicao.longitude}");
+
   if (condominioId == 0) {
     final idString = await ApiConfig.getCondominioId();
     condominioId = int.parse(idString);
