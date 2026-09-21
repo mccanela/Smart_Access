@@ -183,10 +183,7 @@ class SignalRService {
     if (_isDisposed || _hubConnection == null) return;
 
     try {
-      print('[SignalR] 📤 Invoke: PassagemListar($condominioId)');
-      await _hubConnection!.invoke("PassagemListar", args: [condominioId]);
-      print(
-          '[SignalR] ✅ Invoke PassagemListar completado (aguardando evento do servidor...)');
+      await _hubConnection!.invoke("PassagemHistorico", args: [condominioId]);
     } catch (e) {
       print('[SignalR] ❌ Erro ao solicitar lista inicial: $e');
     }

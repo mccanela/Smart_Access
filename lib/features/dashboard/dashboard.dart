@@ -11,7 +11,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/crypto_utils.dart';
 import '../../core/config/api_config.dart';
 import '../../core/services/feedback_utils.dart';
-import 'services/encomenda_fetch_service.dart';
 import 'services/reference_data_service.dart';
 import 'services/delivery_pdf_service.dart';
 import '../../features/unidades/unidade_detalhe_screen.dart'
@@ -33,11 +32,14 @@ import '../../core/services/permission_service.dart';
 import '../../core/theme/icon_colors.dart';
 import '../../shared/widgets/inline_period_picker.dart';
 import '../../shared/widgets/inline_single_date_picker.dart';
+import '../../shared/widgets/filter_tab.dart';
 import '../../core/utils/ui_standards.dart';
 import '../../core/services/signalr_service.dart';
 import '../../core/utils/file_download/file_download.dart';
 
 import '../../shared/widgets/character_counter_field.dart';
+import '../modals/ocorrencias_modal.dart';
+
 import 'dashboard_isolate.dart';
 import 'dashboard_camera_panel.dart';
 
@@ -49,7 +51,6 @@ import 'widgets/standard_autocomplete.dart';
 import 'widgets/mini_segmented.dart';
 import 'widgets/transparent_icon_group.dart';
 import 'widgets/dashboard_small_widgets.dart';
-import '../modals/ocorrencias_modal.dart';
 
 part 'widgets/range_calendar_dialog.dart';
 part 'widgets/painel_selecao_convidados.dart';
@@ -60,6 +61,7 @@ part 'widgets/editar_convidado_panel.dart';
 part 'widgets/camera_modal_widget.dart';
 part 'widgets/modal_selecao_espacos.dart';
 part 'widgets/convidados_modal.dart';
+part 'widgets/convidados_editar_modal.dart';
 part 'widgets/usuario_detalhes_panel.dart';
 part 'widgets/resultados_busca_entrada.dart';
 part 'widgets/detalhes_entrega_panel.dart';
@@ -440,9 +442,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _cadastroBuscado = false; // Controla se já foi feita a busca do cadastro
   dynamic _ultimoPessoadocumentoId;
 
-  // Unidades para encomendas
-  List<Map<String, dynamic>> _unidadesEncomendaList = [];
-  bool _loadingUnidadesEncomenda = false;
   // Locais (ex.: Portaria, Recepçao...) para ENVIAR
   List<Map<String, dynamic>> _locaisEntregaList = [];
   bool _loadingLocaisEntrega = false;
@@ -519,6 +518,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // Dados de convidados por agendamento
   final Map<String, int> _quantidadeConvidados = {};
+// Adicione esta linha junto às variáveis de estado
+  final Map<String, List<dynamic>> _convidadosPorReserva = {};
 
   // Dados de ramais
 
@@ -538,6 +539,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _passagens =
       []; // Passagens ativas (sem data de saída)
   List<Map<String, dynamic>> _todasPassagens = []; // Todas as passagens do dia
+  List<Map<String, dynamic>> _saidasPendentes = [];
+
   bool _loadingPassagens = false;
   bool _mostrarRecentes = false; // Controla se mostrar "Buscar" ou "Recentes"
   final Set<int> _passagensAtualizadas =
@@ -782,8 +785,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'fotoBase64': fotoBase64, // Foto obrigatória
       };
 
-      print(' Payload convidadoupd: $payloadUpd');
-
       final responseUpd = await http.post(
         urlUpd,
         headers: {
@@ -792,8 +793,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
         body: jsonEncode(payloadUpd),
       );
-
-      print('ðŸ“¥ Response convidadoupd: ${responseUpd.statusCode}');
 
       if (responseUpd.statusCode == 200) {
         final dataUpd = jsonDecode(responseUpd.body);
@@ -804,9 +803,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       } else {
         throw Exception('Erro HTTP na atualizaçao: ${responseUpd.statusCode}');
       }
-
-      // 3. Chamar convidadomov (Entrada)
-      print(' Atualizaçao OK. Realizando entrada (convidadomov)...');
 
       // Pequeno delay para garantir processamento no backend
       await Future.delayed(const Duration(milliseconds: 500));
@@ -858,6 +854,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               convidado['foto'] = fotoBase64;
             }
           });
+          _buscarHistoricoFiltrado(false); // 👈 ATUALIZAR TAB PASSAGENS
         } else {
           throw Exception('Erro na movimentaçao: ${dataMov['message']}');
         }
@@ -937,6 +934,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             convidado['saida'] = null; // Limpa data de saída anterior
             convidado['dt_saida'] = null;
           });
+          //_buscarHistoricoFiltrado(false); // 👈 ATUALIZAR TAB PASSAGENS
         } else {
           FeedbackUtils.showError(
               context: context,
@@ -1049,41 +1047,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         } catch (_) {}
       }
 
-      // --- CAPTURA DE FOTO PARA O PAYLOAD ---
-      String? fotoBase64ParaPayload;
-      String? sourceFoto =
-          (dadosEnriquecidos['foto'] ?? convidado['foto'])?.toString();
-      if (sourceFoto == 'null') sourceFoto = null;
-
-      final linkFoto = (dadosEnriquecidos['link_foto'] ??
-              dadosEnriquecidos['foto'] ??
-              convidado['link_foto'] ??
-              convidado['foto'])
-          ?.toString();
-      if (sourceFoto == null || sourceFoto.isEmpty) sourceFoto = linkFoto;
-
-      if (sourceFoto != null && sourceFoto.isNotEmpty && sourceFoto != 'null') {
-        if (sourceFoto.startsWith('http')) {
-          print('📸 Downloading photo for payload: $sourceFoto');
-          try {
-            final respImg = await http.get(Uri.parse(sourceFoto));
-            if (respImg.statusCode == 200) {
-              fotoBase64ParaPayload = base64Encode(respImg.bodyBytes);
-            }
-          } catch (e) {
-            print('⚠️ Error downloading photo: $e');
-          }
-        } else {
-          fotoBase64ParaPayload = sourceFoto;
-        }
-      }
-
-      // Limpeza do base64 para a API
-      if (fotoBase64ParaPayload != null &&
-          fotoBase64ParaPayload.contains(',')) {
-        fotoBase64ParaPayload = fotoBase64ParaPayload.split(',').last;
-      }
-
       // Obter IDs válidos dos dados enriquecidos
       final pessoadocumentoId = _convertToValidId(
               dadosEnriquecidos['pessoadocumento_id'] ??
@@ -1188,14 +1151,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         "observacao":
             (dadosEnriquecidos['observacao'] ?? convidado['observacao'] ?? '')
                 .toString(),
-        "fotobase64_1": fotoBase64ParaPayload ?? '',
-        "fotobase64_2": fotoBase64ParaPayload ?? '',
+        "fotobase64_1": '',
+        "fotobase64_2": '',
       };
-
-      print('📤 Payload registroEntradaAvulso (Fluxo Unificado):');
-      print('   - pessoadocumento_id: $pessoadocumentoId');
-      print('   - apto_id: $unidadeId');
-      print('   - autorizante: ${payload['autorizante']}');
 
       final response = await http.post(
         url,
@@ -1206,80 +1164,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
         body: jsonEncode(payload),
       );
 
-      print('📥 Response registroEntradaAvulso: ${response.statusCode}');
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['status'] == 200) {
-          // FLUXO DE FOTO (IDEM AO SALVAR)
-          String? fotoBase64 =
-              (dadosEnriquecidos['foto'] ?? convidado['foto'])?.toString();
-          if (fotoBase64 == 'null') fotoBase64 = null;
+          // --- CAPTURA DE FOTO PARA O PAYLOAD ---
+          final urlFoto = Uri.parse('${ApiConfig.gateUrl}/FotoRegistrar');
 
-          final linkFoto = (dadosEnriquecidos['link_foto'] ??
-                  dadosEnriquecidos['foto'] ??
-                  convidado['link_foto'] ??
-                  convidado['foto'])
-              ?.toString();
+          // 1. GRAVAR FOTO DO ROSTO (ordem_num: 1)
+          if (_fotoRostoEntrada != null && _fotoRostoEntrada!.isNotEmpty) {
+            final fotoRostoClean = _fotoRostoEntrada!.contains(',')
+                ? _fotoRostoEntrada!.split(',').last
+                : _fotoRostoEntrada!;
 
-          if ((fotoBase64 != null && fotoBase64.isNotEmpty) ||
-              (linkFoto != null && linkFoto.isNotEmpty && linkFoto != 'null')) {
-            final urlFoto = Uri.parse('${ApiConfig.gateUrl}/FotoRegistrar');
-            final sourceFoto = (fotoBase64 != null &&
-                    fotoBase64.isNotEmpty &&
-                    !fotoBase64.startsWith('http'))
-                ? fotoBase64
-                : linkFoto;
-
-            if (sourceFoto != null && sourceFoto.isNotEmpty) {
-              String fotoParaEnviar = '';
-              bool downloadSucesso = true;
-
-              if (sourceFoto.startsWith('http')) {
-                try {
-                  final respImg = await http.get(Uri.parse(sourceFoto));
-                  if (respImg.statusCode == 200) {
-                    fotoParaEnviar = base64Encode(respImg.bodyBytes);
-                  } else {
-                    downloadSucesso = false;
-                  }
-                } catch (e) {
-                  downloadSucesso = false;
-                }
-              } else {
-                fotoParaEnviar = sourceFoto;
-              }
-
-              if (downloadSucesso && fotoParaEnviar.isNotEmpty) {
-                final fotoClean = fotoParaEnviar.contains(',')
-                    ? fotoParaEnviar.split(',').last
-                    : fotoParaEnviar;
-
-                // Usar pessoacadastro_id se tiver, senão tenta o ID principal
-                final targetPessoaId =
-                    pessoaCadastroId > 0 ? pessoaCadastroId : pessoadocumentoId;
-
-                final payloadFoto = {
-                  "condominio_id": condominioId,
-                  "tipoUSU": "USU",
-                  "ordem_num": 1,
-                  "pessoacadastro_id": targetPessoaId,
-                  "foto": fotoClean,
-                };
-
-                await http.post(
-                  urlFoto,
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer $tokenSessao',
-                  },
-                  body: jsonEncode(payloadFoto),
-                );
-              }
-            }
+            await http.post(
+              urlFoto,
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $tokenSessao',
+              },
+              body: jsonEncode({
+                "condominio_id": condominioId,
+                "tipoUSU": "",
+                "ordem_num": 1, // 1 = Rosto
+                "pessoacadastro_id": pessoaCadastroId,
+                "foto": fotoRostoClean,
+              }),
+            );
           }
 
-          // 👇 AQUI ESTÁ A SUBSTITUIÇÃO 👇
+          // 2. GRAVAR FOTO DO DOCUMENTO (ordem_num: 2)
+          if (_fotoDocumentoEntrada != null &&
+              _fotoDocumentoEntrada!.isNotEmpty) {
+            final fotoDocClean = _fotoDocumentoEntrada!.contains(',')
+                ? _fotoDocumentoEntrada!.split(',').last
+                : _fotoDocumentoEntrada!;
+
+            await http.post(
+              urlFoto,
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $tokenSessao',
+              },
+              body: jsonEncode({
+                "condominio_id": condominioId,
+                "tipoUSU": "",
+                "ordem_num": 2, // 2 = Documento
+                "pessoacadastro_id": pessoaCadastroId,
+                "foto": fotoDocClean,
+              }),
+            );
+          }
+
           setState(() {
             _feedbackMessageEntrada = 'Entrada realizada com sucesso!';
           });
@@ -1476,8 +1411,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (condominioIdStr.isNotEmpty) {
         // FORÇAR PREMISSA: Se tem ID, assume que pode usar SignalR (comportamento "antigo")
         // O filtro de ID nos eventos tratará de descartar dados indesejados.
-        print(
-            '✅ [Plano] SignalR habilitado por ID presente ($condominioIdStr)');
         setState(() {
           _enableSignalR = true;
           // Garantir permissão default true, a ser refinada por _verificarPermissaoAcesso
@@ -1702,31 +1635,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     // INICIAR SIGNALR SE HABILITADO
     if (_enableSignalR) {
-      print('🚀 [Dashboard] Iniciando SignalR...');
       _initializeSignalR();
     }
 
     // APIs essenciais que precisam funcionar na abertura da tela
+    await _buscarHistoricoFiltrado(false);
     await _fetchAutorizantes();
     await _fetchMarcasECoresVeiculo();
     await _fetchVagasAvulso();
     await _fetchCrachas();
-    // Passagens agora vêm do SignalR, não da API
-    // await _fetchPassagens();
-    await _fetchUnidadesEncomenda();
-    await _fetchTiposEncomenda();
-    await _fetchLocaisEncomenda();
     await _fetchUnidadesFiltro(); // Carregar unidades para filtro de entrada
     await _fetchEspacosSocial(); // Carregar espaá§os sociais para filtro de entrada
     await _fetchHistoricos();
     await _fetchAgendamentos();
-    await _fetchEntregas();
     await _fetchVeiculos();
     await _fetchVagas();
     await _checkBotoeiras();
-    // Equipamentos carregados pelo EquipamentosFAB widget
 
-    // Listener para busca de unidades em encomendas removido
+    // Equipamentos carregados pelo EquipamentosFAB widget
 
     // Listener para atualizar UI quando documento muda
     _documentoController.addListener(() {
@@ -1814,16 +1740,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       if (processingData.isEmpty) return;
 
-      print('═══════════════════════════════════════════════════════════');
-      print('🔔 [SignalR] RECEBIDO ATUALIZAÇÃO DO SERVIDOR (DEBOUNCED)');
-      print('📊 Total de itens acumulados: ${processingData.length}');
-      for (var i = 0;
-          i < (processingData.length > 3 ? 3 : processingData.length);
-          i++) {
-        print('   Item $i: ${processingData[i]}');
-      }
-      print('═══════════════════════════════════════════════════════════');
-
       if (_cachedCondominioId == 0) {
         _cachedCondominioId = await getCondominioIdAtual();
       }
@@ -1861,22 +1777,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             // Verificar se já temos esse ID na lista atual. Se não tem, é novo e precisa disparar o update.
             bool isNovo = !_todasPassagens
                 .any((existing) => (existing['id']?.toString() ?? '') == id);
-
-            if (isNovo) {
-              idsParaAtualizar.add(id);
-            }
+            print('PassagemUpdateTela: ${id}');
+            await SignalRService().PassagemUpdateTela(id);
           }
         }
 
-        // Disparar atualizaçoes em background de forma controlada (apenas novos)
-        for (var id in idsParaAtualizar) {
-          await SignalRService().PassagemUpdateTela(id);
-        }
-
         if (!mounted) return;
-
-        print(
-            '[SignalR Handler] Passagens processadas: ${passagensMap.length}');
 
         setState(() {
           // Lógica de MERGE SEMPRE ATIVA: Preservar histórico e atualizar/adicionar novos
@@ -1950,8 +1856,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return;
       }
 
-      print('🔔 [SignalR] Recebido: ${passagens.length} cards.');
-
       // 2. Fetch Condominio ID se precisar (apenas para logging ou validação extra, o service já tem)
       if (_cachedCondominioId == 0) {
         _cachedCondominioId = await getCondominioIdAtual();
@@ -2016,10 +1920,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (!_isUsingHistorico()) {
             _historicoFiltrado = passagensOrdenadas;
           }
-          print('✅ [SignalR] setState EXECUTADO!');
-          print('   - _todasPassagens.length: ${_todasPassagens.length}');
-          print('   - _passagens.length: ${_passagens.length}');
-          print('   - _historicoFiltrado.length: ${_historicoFiltrado.length}');
         });
       } catch (e) {
         print('🔴 [SignalR] Erro procesamento lista: $e');
@@ -2373,50 +2273,81 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildTabletLayout() {
-    // Layout Tabulado para tablet
-    // Página 0: Entrada e Passagens (Principais)
-    // Página 1: Unidades
-    // Página 2: ConectCon IA
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 800;
 
     // Verificar permissões
     bool showEntrada =
         PermissionService().hasPermission(40); // Registro de Entrada
     final showUnidades = PermissionService().hasPermission(32); // Unidades
 
-    if (_currentPage == 0) {
-      List<Widget> children = [];
-      if (showEntrada) {
-        children.add(Expanded(child: _panelEntradaSaidas()));
-        children.add(const VerticalSeparator());
+    if (isMobile) {
+      // 📱 Layout Mobile: 1 painel inteiro por tela (Total: 4 páginas)
+      // Se as permissões ainda não foram carregadas, aguarda sem bloquear
+      if (!PermissionService().isLoaded) {
+        return const Center(child: CircularProgressIndicator());
       }
-      children.add(Expanded(child: _panelPassagens()));
-
-      if (children.isEmpty) return const Center(child: Text("Sem acesso"));
-
-      if (children.isNotEmpty && children.last.key == const Key('separator')) {
-        children.removeLast();
+      if (_currentPage == 0) {
+        // Se sem permissão de entrada, vai direto para Passagens (página 1)
+        if (!showEntrada) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _currentPage = 1);
+          });
+          return Row(children: [Expanded(child: _panelPassagens())]);
+        }
+        return Row(children: [Expanded(child: _panelEntradaSaidas())]);
+      } else if (_currentPage == 1) {
+        return Row(children: [Expanded(child: _panelPassagens())]);
+      } else if (_currentPage == 2) {
+        // Se sem permissão de unidades, vai para Ocorrências (página 3)
+        if (!showUnidades) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _currentPage = 3);
+          });
+          return Row(children: [Expanded(child: _panelOcorrencias())]);
+        }
+        return Row(children: [Expanded(child: _panelUnidades())]);
+      } else {
+        return Row(children: [Expanded(child: _panelOcorrencias())]);
       }
-
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: children,
-      );
-    } else if (_currentPage == 1) {
-      if (!showUnidades) return const Center(child: Text("Sem acesso"));
-
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(child: _panelUnidades()),
-        ],
-      );
     } else {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(child: _panelOcorrencias()),
-        ],
-      );
+      // 💻 Layout Tablet: 2 painéis na primeira página (Total: 3 páginas)
+      if (_currentPage == 0) {
+        List<Widget> children = [];
+        if (showEntrada) {
+          children.add(Expanded(child: _panelEntradaSaidas()));
+          children.add(const VerticalSeparator());
+        }
+        children.add(Expanded(child: _panelPassagens()));
+
+        if (children.isEmpty) return const Center(child: Text("Sem acesso"));
+
+        if (children.isNotEmpty &&
+            children.last.key == const Key('separator')) {
+          children.removeLast();
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        );
+      } else if (_currentPage == 1) {
+        if (!showUnidades) return const Center(child: Text("Sem acesso"));
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _panelUnidades()),
+          ],
+        );
+      } else {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _panelOcorrencias()),
+          ],
+        );
+      }
     }
   }
 
@@ -2451,7 +2382,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _togglePage() {
     setState(() {
-      _currentPage = (_currentPage + 1) % 3;
+      final isMobile = MediaQuery.of(context).size.width < 800;
+      final maxPages = isMobile ? 4 : 3;
+      _currentPage = (_currentPage + 1) % maxPages;
     });
   }
 
@@ -2653,14 +2586,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 tooltips: const [
                   'Entrada de avulsos',
                   'Entrada de agendamentos',
-                  'Saída de visitantes e colaboradores'
+                  'Saída de prestadores e visitantes'
                 ],
                 selected: _tabAvulsoAgendamentosSaidas,
-                hasFocus: _grupoEmFoco == 'EntradaSaidas',
+                //hasFocus: _grupoEmFoco == 'EntradaSaidas',
+                hasFocus: false,
                 // --- 1. ENVIE A CONTAGEM PARA O BADGE NO ÍNDICE 1 ---
                 badges: {
                   1: _agendamentos.length,
-                  2: _todasPassagens.length,
+                  2: _saidasPendentes.length,
                 },
                 onChanged: (i) {
                   setState(() {
@@ -2668,7 +2602,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _grupoEmFoco = 'EntradaSaidas'; // <- ADICIONE AQUI
                     if (i == 2) {
                       // Saídas - carregar API passagemhistorico
-                      _fetchPassagens();
+                      _fetchPassagens(true);
                     } else {
                       // Avulso (0) ou Agendamentos (1)
                       // Limpar todos os campos ao trocar entre Avulso e Agendamentos
@@ -2796,7 +2730,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 labels: const ['Passagens'],
                 tooltips: const ['Passagem de usuários'],
                 selected: 0,
-                hasFocus: _grupoEmFoco == 'Passagens',
+                //hasFocus: _grupoEmFoco == 'Passagens',
+                hasFocus: false,
                 onChanged: (_) {
                   setState(() {
                     _grupoEmFoco = 'Passagens';
@@ -2830,15 +2765,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Expanded(
                       child: OcorrenciasScreen(
                         onClose: () {},
-
-                        // --- ENCAIXE O GRUPO EM FOCO AQUI ---
-                        hasFocus: _grupoEmFoco == 'Ocorrencias',
+                        // 👇 DEIXE COMO TRUE AQUI PARA A ABA FICAR AMARELA
+                        hasFocus: false,
                         onFocusRequested: () {
                           setState(() {
                             _grupoEmFoco = 'Ocorrencias';
                           });
                         },
-                        // ------------------------------------
                       ),
                     ),
                   ],
@@ -2876,252 +2809,379 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-// Widget para listar resultados da busca inline
   Widget _buildListaConvidadosResultados() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Filtrar lista baseado na aba selecionada para garantir isolamento absoluto
     final filteredList = _convidadosResultados.where((c) {
       final origemTab = c['origem_tab'] ?? 0;
-      // Só mostramos o registro se a origem dele bate com a aba atual
       return origemTab == _tabAvulsoAgendamentosSaidas;
     }).toList();
 
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const ClampingScrollPhysics(),
-      itemCount: filteredList.length,
-      itemBuilder: (context, index) {
-        final convidado = filteredList[index];
-        final uniqueKey = convidado['id']?.toString() ??
-            convidado['reserva_id']?.toString() ??
-            convidado['pessoadocumento_id']?.toString() ??
-            '';
+    Future<void> abrirEdicaoNoPainel(Map<String, dynamic> convidadoBase) async {
+      Map<String, dynamic> convidado = Map.from(convidadoBase);
+      final reservaId = int.tryParse(convidadoBase['reserva_id']?.toString() ??
+              convidadoBase['id_pai']?.toString() ??
+              '0') ??
+          0;
+      final reservaconvidadoId = int.tryParse(
+              convidadoBase['reservaconvidado_id']?.toString() ??
+                  convidadoBase['id_filho']?.toString() ??
+                  '0') ??
+          0;
 
-        // Verifica se há restrição no cadastro
-        final bool temRestricao =
-            convidado['lista_restricao']?.toString().toUpperCase() == 'S';
+      if (reservaId > 0 && reservaconvidadoId > 0) {
+        final completo =
+            await _obterConvidadoCompleto(reservaId, reservaconvidadoId);
+        if (completo != null) convidado = {...convidadoBase, ...completo};
+      }
 
-        final motivolista_ds = convidado['motivolista_ds']?.toString() ?? '';
-        final tit_restricao = 'RESTRIÇÃO DE ACESSO NESTE CADASTRO';
+      if (!mounted) return;
 
-        // Dados básicos
-        final nome = convidado['nome'] ?? 'Nome não informado';
-        final documento =
-            convidado['documento'] ?? convidado['documento_txt'] ?? '';
-        final unidade =
-            convidado['unidade_mostra'] ?? convidado['unidade'] ?? '';
-        final placa = (convidado['placa'] ?? '').toString();
-        final modelo = (convidado['modelo'] ??
-                convidado['veiculo'] ??
-                convidado['veiculo_txt'] ??
-                '')
-            .toString();
-        final destino = (convidado['destino'] ?? '').toString();
+      // Busca a foto em tempo real do banco de dados antes de abrir o painel
+      final pessoaId = _convertToValidId(convidado['pessoacadastro_id'] ??
+              convidado['pessoadocumento_id']) ??
+          0;
+      if (pessoaId > 0) {
+        await _buscarFotosAvulso(pessoaId, tipoUSU: 'AG');
+        if (_fotoRostoEntrada != null) convidado['foto'] = _fotoRostoEntrada;
+      }
 
-        final dtIni = (convidado['dt_ini'] ?? '').toString();
-        final dtFim = (convidado['dt_fim'] ?? '').toString();
-        final data = (dtIni.isNotEmpty && dtFim.isNotEmpty)
-            ? '$dtIni à $dtFim'
-            : '$dtIni$dtFim';
+      if (!mounted) return;
 
-        // PRIORIDADE DE FOTO:
-        String? fotoParaExibir = convidado['link_foto']?.toString();
-        if (fotoParaExibir == null ||
-            fotoParaExibir.isEmpty ||
-            fotoParaExibir == 'null') {
-          fotoParaExibir = convidado['foto']?.toString();
-        }
-        if (fotoParaExibir == 'null') fotoParaExibir = null;
-
-        // Erro de foto
-        final temErroFoto = _cardsComErroFoto.contains(uniqueKey);
-
-        // Status de Entrada/Saída - Mapeamento mais robusto
-        final entradaStr = (convidado['entrada'] ??
-                convidado['dt_entrada'] ??
-                convidado['data_entrada'] ??
-                convidado['dt_ini'] ??
-                '')
-            .toString();
-        final saidaStr = (convidado['saida'] ??
-                convidado['dt_saida'] ??
-                convidado['data_saida'] ??
-                convidado['dt_fim'] ??
-                '')
-            .toString();
-
-        bool jaDeuEntrada = entradaStr.isNotEmpty;
-        bool jaDeuSaida = saidaStr.isNotEmpty;
-
-        // Define a cor da borda dando preferência à RESTRIÇÃO
-        Color borderColor = getBorderColor(context);
-        if (temRestricao) {
-          borderColor = Colors.red.shade700;
-        } else if (temErroFoto) {
-          borderColor = Colors.red;
-        } else if (jaDeuEntrada && !jaDeuSaida) {
-          borderColor = Colors.orange;
-        } else if (jaDeuEntrada && jaDeuSaida) {
-          borderColor = Colors.green;
-        }
-
-        // Define o fundo do card (destaque avermelhado em caso de restrição)
-        Color cardBgColor = getCardColor(context);
-        if (temRestricao) {
-          cardBgColor =
-              isDark ? const Color(0xFF3B181A) : const Color(0xFFFDE8E8);
-        }
-
-        // Verificar se cartão está expandido
-        final isExpanded = _cardsExpandidos.contains(uniqueKey);
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          constraints: const BoxConstraints(minHeight: 100),
-          decoration: BoxDecoration(
-            color: cardBgColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: borderColor,
-              width: (temRestricao || temErroFoto) ? 2.0 : 1.0,
+      abrirPainelLateralGlobal(Container(
+        width: MediaQuery.of(context).size.width * 0.4,
+        color: getBackgroundColor(context),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Editar Convidado',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: getTextColor(context))),
+                IconButton(
+                    icon: Icon(Icons.close, color: getTextColor(context)),
+                    onPressed: () => fecharPainelLateralGlobal())
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
+            const SizedBox(height: 16),
+            // INSTANCIAMOS O NOVO WIDGET AQUI!
+            Expanded(
+                child: EditarConvidadoModal(
+                    convidado: convidado,
+                    marcasList: _marcasList,
+                    coresList: _coresList,
+                    vagasList: _vagasAvulsoList,
+                    onSalvar: (dadosAtualizados) async {
+                      // Caso precise, a lógica de atualizar no banco roda aqui
+                      fecharPainelLateralGlobal();
+                    },
+                    onEntrada: (dadosAtualizados) async {
+                      final tipo =
+                          dadosAtualizados['tipo']?.toString().toUpperCase();
+                      if (tipo == 'AG' || tipo == 'AG_EMPTY') {
+                        bool isNovaEntrada = (dadosAtualizados['entrada'] ?? '')
+                                .toString()
+                                .isEmpty &&
+                            (dadosAtualizados['saida'] ?? '')
+                                .toString()
+                                .isEmpty;
+                        if (isNovaEntrada) {
+                          await _registrarPrimeiraEntradaAgendamento(
+                              dadosAtualizados);
+                        } else {
+                          await _realizarEntradaDireta(dadosAtualizados);
+                        }
+
+                        final rId =
+                            dadosAtualizados['reserva_id']?.toString() ??
+                                dadosAtualizados['id_pai']?.toString() ??
+                                '';
+                        if (rId.isNotEmpty) _fetchConvidadosAgendamento(rId);
+
+                        fecharPainelLateralGlobal();
+                        _buscarHistoricoFiltrado(false);
+                      }
+                    },
+                    onSaida: (dadosAtualizados) async {
+                      final rId = dadosAtualizados['reserva_id']?.toString() ??
+                          dadosAtualizados['id_pai']?.toString() ??
+                          '';
+                      final rcId =
+                          dadosAtualizados['reservaconvidado_id']?.toString() ??
+                              dadosAtualizados['id_filho']?.toString() ??
+                              dadosAtualizados['id']?.toString() ??
+                              '';
+
+                      if (rId.isEmpty || rcId.isEmpty) {
+                        FeedbackUtils.showError(
+                            context: context,
+                            title: 'Erro',
+                            message: 'IDs não encontrados');
+                        return;
+                      }
+
+                      final success =
+                          await registrarEntradaSaidaGlobal(rId, rcId, false);
+                      if (success) {
+                        FeedbackUtils.showSuccess(
+                            context: context,
+                            title: 'Sucesso',
+                            message: 'Saída registrada!');
+                        if (rId.isNotEmpty) _fetchConvidadosAgendamento(rId);
+                        fecharPainelLateralGlobal();
+                      }
+                    })),
+          ],
+        ),
+      ));
+    }
+
+    List<IconActionData> construirAcoes(Map<String, dynamic> convidado,
+        String uniqueKey, bool jaDeuEntrada, bool jaDeuSaida, String unidade) {
+      return [
+        if (convidado['tipo'] == 'AG_EMPTY')
+          IconActionData(
+            icon: Icons.person_add_rounded,
+            tooltip: 'Adicionar Visitante',
+            onPressed: () => abrirEdicaoNoPainel(convidado),
+            color: Colors.blue[600],
+          )
+        else ...[
+          // Botão 1: Editar (já existente)
+          IconActionData(
+            icon: Icons.edit,
+            tooltip: 'Editar / Detalhes',
+            isOpaque: false,
+            onPressed: () => abrirEdicaoNoPainel(convidado),
+          ),
+
+// 👇 NOVO: Botão de Registrar Entrada (Expande o card)
+          if (!jaDeuEntrada || (jaDeuEntrada && jaDeuSaida))
+            IconActionData(
+              icon: Icons.login_rounded,
+              tooltip: 'Dar Entrada Rápida',
+              color: const Color(0xFF00C853), // Verde de destaque
+              isMarked:
+                  true, // 👈 CORREÇÃO: isMarked deixa o fundo preenchido e chamativo!
+              isOpaque:
+                  false, // 👈 Garante que ele não fique "apagado/desabilitado"
+              onPressed: () {
+                setState(() {
+                  // Se já estiver aberto, fecha. Se não, abre.
+                  if (_cardsExpandidos.contains(uniqueKey)) {
+                    _cardsExpandidos.remove(uniqueKey);
+                  } else {
+                    _cardsExpandidos.add(uniqueKey);
+                  }
+                });
+              },
+            ),
+        ]
+      ];
+    }
+
+    // --- 2. FUNÇÃO: CARD ORIGINAL PARA O MODO AVULSO ---
+    Widget construirCardDoConvidado(Map<String, dynamic> convidado) {
+      final uniqueKey = convidado['id']?.toString() ??
+          convidado['reserva_id']?.toString() ??
+          convidado['pessoadocumento_id']?.toString() ??
+          '';
+
+      final bool temRestricao =
+          convidado['lista_restricao']?.toString().toUpperCase() == 'S';
+      final motivolista_ds = convidado['motivolista_ds']?.toString() ?? '';
+      final tit_restricao = 'RESTRIÇÃO DE ACESSO NESTE CADASTRO';
+
+      final nome = convidado['nome'] ?? 'Nome não informado';
+      final documento =
+          convidado['documento'] ?? convidado['documento_txt'] ?? '';
+      final unidade = convidado['unidade_mostra'] ?? convidado['unidade'] ?? '';
+      final placa = (convidado['placa'] ?? '').toString();
+      final modelo = (convidado['modelo'] ??
+              convidado['veiculo'] ??
+              convidado['veiculo_txt'] ??
+              '')
+          .toString();
+      final destino = (convidado['destino'] ?? '').toString();
+
+      final dtIni = (convidado['dt_ini'] ?? '').toString();
+      final dtFim = (convidado['dt_fim'] ?? '').toString();
+      final data = (dtIni.isNotEmpty && dtFim.isNotEmpty)
+          ? '$dtIni à $dtFim'
+          : '$dtIni$dtFim';
+
+      String? fotoParaExibir = convidado['link_foto']?.toString();
+      if (fotoParaExibir == null ||
+          fotoParaExibir.isEmpty ||
+          fotoParaExibir == 'null') {
+        fotoParaExibir = convidado['foto']?.toString();
+      }
+      if (fotoParaExibir == 'null') fotoParaExibir = null;
+
+      final temErroFoto = _cardsComErroFoto.contains(uniqueKey);
+
+      final entradaStr = (convidado['entrada'] ??
+              convidado['dt_entrada'] ??
+              convidado['data_entrada'] ??
+              convidado['dt_ini'] ??
+              '')
+          .toString();
+      final saidaStr = (convidado['saida'] ??
+              convidado['dt_saida'] ??
+              convidado['data_saida'] ??
+              convidado['dt_fim'] ??
+              '')
+          .toString();
+
+      bool jaDeuEntrada = entradaStr.isNotEmpty;
+      bool jaDeuSaida = saidaStr.isNotEmpty;
+
+      Color borderColor = getBorderColor(context);
+      if (temRestricao)
+        borderColor = Colors.red.shade700;
+      else if (temErroFoto)
+        borderColor = Colors.red;
+      else if (jaDeuEntrada && !jaDeuSaida)
+        borderColor = Colors.orange;
+      else if (jaDeuEntrada && jaDeuSaida) borderColor = Colors.green;
+
+      Color cardBgColor = getCardColor(context);
+      if (temRestricao)
+        cardBgColor =
+            isDark ? const Color(0xFF3B181A) : const Color(0xFFFDE8E8);
+
+      final isExpanded = _cardsExpandidos.contains(uniqueKey);
+      final acoes = construirAcoes(
+          convidado, uniqueKey, jaDeuEntrada, jaDeuSaida, unidade);
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        constraints: const BoxConstraints(minHeight: 100),
+        decoration: BoxDecoration(
+          color: cardBgColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: borderColor,
+              width: (temRestricao || temErroFoto) ? 2.0 : 1.0),
+          boxShadow: [
+            BoxShadow(
                 color: temRestricao
                     ? Colors.red.withOpacity(0.15)
                     : Colors.black.withValues(alpha: 0.04),
                 blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Badge/Alerta visual no topo do card caso haja restrição
-              if (temRestricao)
-                Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-                  decoration: BoxDecoration(
+                offset: const Offset(0, 4)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (temRestricao)
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+                decoration: BoxDecoration(
                     color: Colors.red.shade700,
                     borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(10),
-                      topRight: Radius.circular(10),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.warning_amber_rounded,
-                          color: Colors.white, size: 16),
-                      const SizedBox(width: 6),
-                      Text(
-                        tit_restricao,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              IntrinsicHeight(
+                        topLeft: Radius.circular(10),
+                        topRight: Radius.circular(10))),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Lado Esquerdo: Foto
-                    InkWell(
-                      onTap: () async {
-                        final globalContext = _dashboardContext ?? context;
-                        final result = await showDialog(
+                    const Icon(Icons.warning_amber_rounded,
+                        color: Colors.white, size: 16),
+                    const SizedBox(width: 6),
+                    Text(tit_restricao,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5)),
+                  ],
+                ),
+              ),
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  InkWell(
+                    onTap: () async {
+                      final globalContext = _dashboardContext ?? context;
+                      final result = await showDialog(
                           context: globalContext,
                           barrierColor: Colors.black.withValues(alpha: 0.5),
-                          builder: (ctx) => const FacialCaptureModal(),
-                        );
-
-                        if (result != null && result is String) {
-                          setState(() {
-                            convidado['foto'] = result;
-                            _cardsComErroFoto.remove(uniqueKey);
-                          });
-                        }
-                      },
-                      child: Container(
-                        width: 80,
-                        decoration: BoxDecoration(
-                          color: isDark ? Colors.grey[850] : Colors.grey[100],
-                          borderRadius: BorderRadius.only(
+                          builder: (ctx) => const FacialCaptureModal());
+                      if (result != null && result is String)
+                        setState(() {
+                          convidado['foto'] = result;
+                          _cardsComErroFoto.remove(uniqueKey);
+                        });
+                    },
+                    child: Container(
+                      width: 80,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey[850] : Colors.grey[100],
+                        borderRadius: BorderRadius.only(
                             topLeft: Radius.circular(temRestricao ? 0 : 11),
                             bottomLeft: isExpanded
                                 ? Radius.zero
-                                : const Radius.circular(11),
-                          ),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.only(
+                                : const Radius.circular(11)),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.only(
                             topLeft: Radius.circular(temRestricao ? 0 : 11),
-                            bottomLeft: Radius.circular(11),
-                          ),
-                          child: _buildCardPhoto(fotoParaExibir, isDark,
-                              uniqueKey: uniqueKey),
-                        ),
+                            bottomLeft: Radius.circular(11)),
+                        child: _buildCardPhoto(fotoParaExibir, isDark,
+                            uniqueKey: uniqueKey),
                       ),
                     ),
-
-                    // Lado Direito: Informações e Ações
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            // Informações
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (destino.isNotEmpty)
-                                  GestureDetector(
-                                    child: Text(
-                                      destino,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: getTextColor(context),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        letterSpacing: -0.5,
-                                      ),
-                                    ),
-                                  ),
-                                if (data.isNotEmpty)
-                                  GestureDetector(
-                                    child: Text(
-                                      data,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: getTextColor(context),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        letterSpacing: -0.5,
-                                      ),
-                                    ),
-                                  ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (destino.isNotEmpty &&
+                                  _tabAvulsoAgendamentosSaidas != 1)
                                 GestureDetector(
-                                  onTap: () => setState(() =>
-                                      _revealedPii.add('${uniqueKey}_nome')),
-                                  child: Text(
-                                    _revealedPii.contains('${uniqueKey}_nome')
-                                        ? nome
-                                        : _maskName(nome),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
+                                    child: Text(destino,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                            color: getTextColor(context),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                            letterSpacing: -0.5))),
+                              if (data.isNotEmpty &&
+                                  _tabAvulsoAgendamentosSaidas != 1)
+                                GestureDetector(
+                                    child: Text(data,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                            color: getTextColor(context),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                            letterSpacing: -0.5))),
+                              GestureDetector(
+                                onTap: () => setState(() =>
+                                    _revealedPii.add('${uniqueKey}_nome')),
+                                child: Text(
+                                  _revealedPii.contains('${uniqueKey}_nome')
+                                      ? nome
+                                      : _maskName(nome),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
                                       color: temRestricao
                                           ? (isDark
                                               ? Colors.red.shade300
@@ -3129,134 +3189,118 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           : getTextColor(context),
                                       fontSize: 14,
                                       fontWeight: FontWeight.bold,
-                                      letterSpacing: -0.5,
-                                    ),
-                                  ),
+                                      letterSpacing: -0.5),
                                 ),
-                                const SizedBox(height: 2),
-                                if (documento.isNotEmpty)
-                                  GestureDetector(
-                                    onTap: () => setState(() =>
-                                        _revealedPii.add('${uniqueKey}_doc')),
-                                    child: Text(
+                              ),
+                              const SizedBox(height: 2),
+                              if (documento.isNotEmpty)
+                                GestureDetector(
+                                  onTap: () => setState(() =>
+                                      _revealedPii.add('${uniqueKey}_doc')),
+                                  child: Text(
                                       _revealedPii.contains('${uniqueKey}_doc')
                                           ? documento
                                           : _maskDocument(documento),
                                       style: TextStyle(
-                                        color: getSecondaryTextColor(context),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                if (unidade.isNotEmpty)
-                                  Text(
-                                    unidade,
+                                          color: getSecondaryTextColor(context),
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500)),
+                                ),
+                              if (unidade.isNotEmpty &&
+                                  _tabAvulsoAgendamentosSaidas != 1)
+                                Text(unidade,
                                     style: TextStyle(
-                                      color: getSecondaryTextColor(context)
-                                          .withValues(alpha: 0.8),
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                if (placa.isNotEmpty || modelo.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.directions_car_rounded,
-                                            size: 14,
-                                            color:
-                                                getSecondaryTextColor(context)
-                                                    .withValues(alpha: 0.6)),
-                                        const SizedBox(width: 4),
-                                        Expanded(
+                                        color: getSecondaryTextColor(context)
+                                            .withValues(alpha: 0.8),
+                                        fontSize: 14)),
+                              if (placa.isNotEmpty || modelo.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.directions_car_rounded,
+                                          size: 14,
+                                          color: getSecondaryTextColor(context)
+                                              .withValues(alpha: 0.6)),
+                                      const SizedBox(width: 4),
+                                      Expanded(
                                           child: Text(
-                                            '${modelo.isNotEmpty ? modelo : ""}${modelo.isNotEmpty && placa.isNotEmpty ? " • " : ""}$placa',
-                                            style: TextStyle(
-                                              color:
-                                                  getSecondaryTextColor(context)
+                                              '${modelo.isNotEmpty ? modelo : ""}${modelo.isNotEmpty && placa.isNotEmpty ? " • " : ""}$placa',
+                                              style: TextStyle(
+                                                  color: getSecondaryTextColor(
+                                                          context)
                                                       .withValues(alpha: 0.8),
-                                              fontSize: 12,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                                  fontSize: 12),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis)),
+                                    ],
                                   ),
-                              ],
-                            ),
-                          ],
-                        ),
+                                ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-
-              // Seção Expandida (Unidade e Autorizante)
-              if (isExpanded)
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
+            ),
+            if (isExpanded)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
                     border: Border(
                         top: BorderSide(color: getDividerColor(context))),
                     color: isDark ? Colors.black12 : Colors.grey.shade50,
                     borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(12),
-                      bottomRight: Radius.circular(12),
+                        bottomLeft: Radius.circular(12),
+                        bottomRight: Radius.circular(12))),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Selecione os dados para Nova Entrada:',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    buildStandardAutocomplete<Map<String, dynamic>>(
+                      context: context,
+                      labelText: 'Unidade',
+                      items: _unidadesFiltroList,
+                      itemAsString: (u) =>
+                          u['unidade_mostra'] ?? u['nome'] ?? '',
+                      selectedItem: _unidadeSelecionadaAvulso[uniqueKey],
+                      onSelected: (val) {
+                        setState(() {
+                          if (val != null) {
+                            _unidadeSelecionadaAvulso[uniqueKey] = val;
+                            final autorizanteController =
+                                _autorizanteAvulsoControllers.putIfAbsent(
+                                    uniqueKey, () => TextEditingController());
+                            final autorizanteNome = val['nome_morador'] ??
+                                val['morador'] ??
+                                val['pessoa'] ??
+                                val['nome'] ??
+                                val['unidade_mostra'] ??
+                                '';
+                            autorizanteController.text = autorizanteNome;
+                          }
+                        });
+                      },
+                      constraints:
+                          const BoxConstraints(maxHeight: 200, maxWidth: 300),
+                      prefixIcon: Icons.home,
                     ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Selecione os dados para Nova Entrada:',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 12),
-                      // Dropdown Unidade
-                      buildStandardAutocomplete<Map<String, dynamic>>(
-                        context: context,
-                        labelText: 'Unidade',
-                        items: _unidadesFiltroList,
-                        itemAsString: (u) =>
-                            u['unidade_mostra'] ?? u['nome'] ?? '',
-                        selectedItem: _unidadeSelecionadaAvulso[uniqueKey],
-                        onSelected: (val) {
-                          setState(() {
-                            if (val != null) {
-                              _unidadeSelecionadaAvulso[uniqueKey] = val;
-                              final autorizanteController =
-                                  _autorizanteAvulsoControllers.putIfAbsent(
-                                      uniqueKey, () => TextEditingController());
-                              final autorizanteNome = val['nome_morador'] ??
-                                  val['morador'] ??
-                                  val['pessoa'] ??
-                                  val['nome'] ??
-                                  val['unidade_mostra'] ??
-                                  '';
-                              autorizanteController.text = autorizanteNome;
-                            }
-                          });
-                        },
-                        constraints:
-                            const BoxConstraints(maxHeight: 200, maxWidth: 300),
-                        prefixIcon: Icons.home,
-                      ),
-                      const SizedBox(height: 12),
-                      // Campo Autorizante
-                      TextField(
+                    const SizedBox(height: 12),
+                    TextField(
                         controller: _autorizanteAvulsoControllers.putIfAbsent(
                             uniqueKey, () => TextEditingController()),
                         decoration: inputDecorationPadrao(context,
-                            labelText: 'Autorizante'),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TransparentIconGroup([
-                            IconActionData(
+                            labelText: 'Autorizante')),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TransparentIconGroup([
+                          IconActionData(
                               icon: Icons.close,
                               tooltip: 'Cancelar',
                               onPressed: () {
@@ -3264,436 +3308,508 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   _cardsExpandidos.remove(uniqueKey);
                                 });
                               },
-                              color: Colors.red,
-                            ),
-                            IconActionData(
-                              icon: Icons.check,
-                              tooltip: 'Confirmar Entrada',
-                              onPressed: _loadingRegistroEntrada
-                                  ? null
-                                  : () {
-                                      final unidadeSel =
-                                          _unidadeSelecionadaAvulso[uniqueKey];
-                                      final autorizanteTxt =
-                                          _autorizanteAvulsoControllers[
-                                                      uniqueKey]
-                                                  ?.text ??
-                                              '';
-
-                                      if (unidadeSel == null) {
-                                        FeedbackUtils.showWarning(
-                                            context: context,
-                                            title: 'Atençao',
-                                            message: 'Selecione uma unidade.');
-                                        return;
-                                      }
-                                      final unidadeId = _convertToValidId(
-                                              unidadeSel['id'] ??
-                                                  unidadeSel['apto_id'] ??
-                                                  unidadeSel['unidade_id']) ??
-                                          0;
-
-                                      if (unidadeId == 0) {
-                                        FeedbackUtils.showWarning(
-                                            context: context,
-                                            title: 'Unidade Inválida',
-                                            message:
-                                                'Não foi possível identificar o ID da unidade selecionada.');
-                                        return;
-                                      }
-
-                                      _registrarEntradaAvulsoSimples(
-                                        convidado,
-                                        unidadeId,
-                                        autorizanteTxt,
-                                        loadingKey: uniqueKey,
-                                      );
-                                    },
-                              color: Colors.green,
-                              isLoading: _loadingRegistroEntrada ||
-                                  _loadingEntradaAvulsoKeys.contains(uniqueKey),
-                              isMarked: true,
-                            ),
-                          ]),
-                        ],
-                      )
-                    ],
-                  ),
+                              color: Colors.red),
+                          IconActionData(
+                            icon: Icons.check,
+                            tooltip: 'Confirmar Entrada',
+                            color: Colors.green,
+                            isLoading: _loadingRegistroEntrada ||
+                                _loadingEntradaAvulsoKeys.contains(uniqueKey),
+                            isMarked: true,
+                            onPressed: _loadingRegistroEntrada
+                                ? null
+                                : () {
+                                    final unidadeSel =
+                                        _unidadeSelecionadaAvulso[uniqueKey];
+                                    final autorizanteTxt =
+                                        _autorizanteAvulsoControllers[uniqueKey]
+                                                ?.text ??
+                                            '';
+                                    if (unidadeSel == null) {
+                                      FeedbackUtils.showWarning(
+                                          context: context,
+                                          title: 'Atenção',
+                                          message: 'Selecione uma unidade.');
+                                      return;
+                                    }
+                                    final unidadeId = _convertToValidId(
+                                            unidadeSel['id'] ??
+                                                unidadeSel['apto_id'] ??
+                                                unidadeSel['unidade_id']) ??
+                                        0;
+                                    if (unidadeId == 0) {
+                                      FeedbackUtils.showWarning(
+                                          context: context,
+                                          title: 'Unidade Inválida',
+                                          message:
+                                              'Não foi possível identificar o ID.');
+                                      return;
+                                    }
+                                    _registrarEntradaAvulsoSimples(
+                                        convidado, unidadeId, autorizanteTxt,
+                                        loadingKey: uniqueKey);
+                                  },
+                          ),
+                        ]),
+                      ],
+                    )
+                  ],
                 ),
-
-              // Ação (Botões) - Só mostra se NÃO estiver expandido
-              if (!isExpanded)
-                Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: getDividerColor(context),
-                ),
-              if (!isExpanded)
-                Padding(
-                  padding: const EdgeInsets.only(
-                      left: 16, right: 16, bottom: 12, top: 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // Lado Esquerdo: Exibição do Motivo da Restrição (se houver)
-                      Expanded(
-                        child: (temRestricao && motivolista_ds.isNotEmpty)
-                            ? Row(
-                                children: [
-                                  Icon(
-                                    Icons.error_outline,
-                                    size: 16,
-                                    color: isDark
-                                        ? Colors.red.shade300
-                                        : Colors.red.shade800,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Flexible(
-                                    child: Text(
-                                      'Motivo: $motivolista_ds',
+              ),
+            if (!isExpanded)
+              Divider(height: 1, thickness: 1, color: getDividerColor(context)),
+            if (!isExpanded)
+              Padding(
+                padding: const EdgeInsets.only(
+                    left: 16, right: 16, bottom: 12, top: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: (temRestricao && motivolista_ds.isNotEmpty)
+                          ? Row(children: [
+                              Icon(Icons.error_outline,
+                                  size: 16,
+                                  color: isDark
+                                      ? Colors.red.shade300
+                                      : Colors.red.shade800),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                  child: Text('Motivo: $motivolista_ds',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        color: isDark
-                                            ? Colors.red.shade300
-                                            : Colors.red.shade900,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : const SizedBox.shrink(),
-                      ),
-
-                      // Lado Direito: Grupo de Botões (Editar, Nova Entrada, etc)
-                      TransparentIconGroup([
-                        if (convidado['tipo'] == 'AG_EMPTY')
-                          IconActionData(
-                            icon: Icons.person_add_rounded,
-                            tooltip: 'Adicionar Visitante',
-                            onPressed: () =>
-                                _selecionarConvidadoParaEntrada(convidado),
-                            color: Colors.blue[600],
-                          )
-                        else ...[
-                          IconActionData(
-                            icon: Icons.edit,
-                            tooltip: 'Editar',
-                            onPressed: () =>
-                                _selecionarConvidadoParaEntrada(convidado),
-                            isOpaque: false,
-                          ),
-                          if (jaDeuEntrada && !jaDeuSaida)
-                            IconActionData(
-                              icon: Icons.logout,
-                              tooltip: 'Registrar Saída',
-                              onPressed: () async {
-                                final reservaId =
-                                    convidado['reserva_id']?.toString() ??
-                                        convidado['id_pai']?.toString() ??
-                                        '';
-                                final reservaconvidadoId =
-                                    convidado['reservaconvidado_id']
-                                            ?.toString() ??
-                                        convidado['id_filho']?.toString() ??
-                                        convidado['id']?.toString() ??
-                                        '';
-
-                                if (reservaId.isEmpty ||
-                                    reservaconvidadoId.isEmpty) {
-                                  FeedbackUtils.showError(
-                                      context: context,
-                                      title: 'Erro',
-                                      message: 'IDs não encontrados');
-                                  return;
-                                }
-
-                                final success =
-                                    await registrarEntradaSaidaGlobal(
-                                        reservaId, reservaconvidadoId, false);
-                                if (success) {
-                                  setState(() {
-                                    _feedbackMessageEntrada =
-                                        'Saída registrada com sucesso!';
-
-                                    final agora = DateTime.now();
-                                    final dataFormatada =
-                                        '${agora.day.toString().padLeft(2, '0')}/${agora.month.toString().padLeft(2, '0')}/${agora.year} ${agora.hour.toString().padLeft(2, '0')}:${agora.minute.toString().padLeft(2, '0')}:${agora.second.toString().padLeft(2, '0')}';
-                                    convidado['saida'] = dataFormatada;
-                                    convidado['dt_saida'] = dataFormatada;
-                                  });
-
-                                  Future.delayed(const Duration(seconds: 4),
-                                      () {
-                                    if (mounted) {
-                                      setState(() {
-                                        _feedbackMessageEntrada = '';
-                                      });
-                                    }
-                                  });
-                                }
-                              },
-                              color: Colors.red,
-                            ),
-                          // Botão Nova Entrada (Visível tanto para 'AV' quanto para 'AG')
-                          if (!jaDeuEntrada)
-                            IconActionData(
-                              icon: Icons.login,
-                              tooltip: 'Nova Entrada',
-                              onPressed: () async {
-                                final nomeVal = convidado['nome'] ??
-                                    convidado['convidado_txt'];
-                                final docVal = convidado['documento'] ??
-                                    convidado['documento_txt'];
-                                if (nomeVal == null ||
-                                    nomeVal.toString().trim().isEmpty ||
-                                    docVal == null ||
-                                    docVal.toString().trim().isEmpty) {
-                                  FeedbackUtils.showWarning(
-                                      context: context,
-                                      title: 'Dados Incompletos',
-                                      message: 'Preencha Nome e Documento.');
-                                  return;
-                                }
-
-                                // Validação de Foto antes da entrada
-                                String? fotoBase64 =
-                                    convidado['foto']?.toString();
-                                bool fotoValida = fotoBase64 != null &&
-                                    fotoBase64.isNotEmpty &&
-                                    fotoBase64 != 'null' &&
-                                    fotoBase64.length > 50;
-                                if (fotoBase64 != null &&
-                                    fotoBase64.startsWith('http')) {
-                                  fotoValida = true;
-                                }
-
-                                if (!fotoValida) {
-                                  final linkFoto =
-                                      convidado['link_foto']?.toString();
-                                  if (linkFoto != null &&
-                                      linkFoto.startsWith('http')) {
-                                    fotoValida = true;
-                                  }
-                                }
-
-                                if (!fotoValida) {
-                                  final globalContext =
-                                      _dashboardContext ?? context;
-                                  final result = await showDialog(
-                                    context: globalContext,
-                                    barrierColor:
-                                        Colors.black.withValues(alpha: 0.5),
-                                    builder: (ctx) =>
-                                        const FacialCaptureModal(),
-                                  );
-                                  if (result != null && result is String) {
-                                    setState(() {
-                                      convidado['foto'] = result;
-                                      _cardsComErroFoto.remove(uniqueKey);
-                                    });
-                                  } else {
-                                    FeedbackUtils.showWarning(
-                                        context: context,
-                                        title: 'Foto Obrigatória',
-                                        message:
-                                            'Tire a foto para prosseguir.');
-                                    return;
-                                  }
-                                }
-
-                                // TRATAMENTO POR TIPO ('AG' vs 'AV')
-                                final tipo =
-                                    convidado['tipo']?.toString().toUpperCase();
-                                if (tipo == 'AG') {
-                                  final entry = (convidado['entrada'] ??
-                                          convidado['dt_entrada'] ??
-                                          '')
-                                      .toString();
-                                  final exit = (convidado['saida'] ??
-                                          convidado['dt_saida'] ??
-                                          '')
-                                      .toString();
-                                  bool isNovaEntrada =
-                                      entry.isEmpty && exit.isEmpty;
-
-                                  if (isNovaEntrada) {
-                                    await _registrarPrimeiraEntradaAgendamento(
-                                        convidado);
-                                  } else {
-                                    await _realizarEntradaDireta(convidado);
-                                  }
-                                } else {
-                                  // Entrada Avulsa (AV) -> Expande o card para confirmação de unidade/autorizante
-                                  setState(() {
-                                    _cardsExpandidos.add(uniqueKey);
-                                  });
-                                }
-                              },
-                              isMarked: true,
-                              color: Colors.green,
-                            ),
-                          if (!jaDeuEntrada &&
-                              convidado['tipo'] != 'AG' &&
-                              convidado['tipo'] != 'AG_EMPTY' &&
-                              unidade.isNotEmpty)
-                            IconActionData(
-                              icon:
-                                  _loadingEntradaAvulsoKeys.contains(uniqueKey)
-                                      ? Icons.hourglass_empty
-                                      : Icons.history,
-                              tooltip:
-                                  _loadingEntradaAvulsoKeys.contains(uniqueKey)
-                                      ? 'Registrando...'
-                                      : 'Entrada na última unidade: $unidade',
-                              isLoading:
-                                  _loadingEntradaAvulsoKeys.contains(uniqueKey),
-                              onPressed: _loadingEntradaAvulsoKeys
-                                      .contains(uniqueKey)
-                                  ? null
-                                  : () async {
-                                      String? fotoBase64 =
-                                          convidado['foto']?.toString();
-                                      bool fotoValida = fotoBase64 != null &&
-                                          fotoBase64.isNotEmpty &&
-                                          fotoBase64 != 'null' &&
-                                          fotoBase64.length > 50;
-                                      if (fotoBase64 != null &&
-                                          fotoBase64.startsWith('http')) {
-                                        fotoValida = true;
-                                      }
-
-                                      if (!fotoValida) {
-                                        final linkFoto =
-                                            convidado['link_foto']?.toString();
-                                        if (linkFoto != null &&
-                                            linkFoto.isNotEmpty &&
-                                            linkFoto.startsWith('http')) {
-                                          fotoValida = true;
-                                        }
-                                      }
-
-                                      if (!fotoValida) {
-                                        final globalContext =
-                                            _dashboardContext ?? context;
-                                        final result = await showDialog(
-                                          context: globalContext,
-                                          barrierColor: Colors.black
-                                              .withValues(alpha: 0.5),
-                                          builder: (ctx) =>
-                                              const FacialCaptureModal(),
-                                        );
-                                        if (result != null &&
-                                            result is String) {
-                                          setState(() {
-                                            convidado['foto'] = result;
-                                            _cardsComErroFoto.remove(uniqueKey);
-                                          });
-                                        } else {
-                                          FeedbackUtils.showWarning(
-                                              context: context,
-                                              title: 'Foto Obrigatória',
-                                              message:
-                                                  'Tire a foto para prosseguir.');
-                                          return;
-                                        }
-                                      }
-
-                                      int unidadeId = 0;
-
-                                      if (convidado['unidade_id'] != null) {
-                                        unidadeId =
-                                            convidado['unidade_id'] is int
-                                                ? convidado['unidade_id']
-                                                : int.tryParse(
-                                                        convidado['unidade_id']
-                                                            .toString()) ??
-                                                    0;
-                                      }
-
-                                      if (unidadeId == 0) {
-                                        try {
-                                          final unidadeObj =
-                                              _unidadesFiltroList.firstWhere(
-                                            (u) {
-                                              final unidadeMostra =
-                                                  (u['unidade_mostra'] ??
-                                                          u['nome'] ??
-                                                          '')
-                                                      .toString();
-                                              return unidadeMostra == unidade;
-                                            },
-                                            orElse: () {
-                                              return _unidadesFiltroList
-                                                  .firstWhere(
-                                                (u) {
-                                                  final unidadeMostra =
-                                                      (u['unidade_mostra'] ??
-                                                              u['nome'] ??
-                                                              '')
-                                                          .toString();
-                                                  return unidadeMostra
-                                                      .contains(unidade);
-                                                },
-                                                orElse: () => {},
-                                              );
-                                            },
-                                          );
-
-                                          if (unidadeObj.isNotEmpty) {
-                                            unidadeId = _convertToValidId(
-                                                    unidadeObj['id'] ??
-                                                        unidadeObj['apto_id'] ??
-                                                        unidadeObj[
-                                                            'unidade_id']) ??
-                                                0;
-                                          }
-                                        } catch (e) {
-                                          print(
-                                              'Erro ao buscar ID da unidade: $e');
-                                        }
-                                      }
-
-                                      if (unidadeId > 0) {
-                                        _registrarEntradaAvulsoSimples(
-                                          convidado,
-                                          unidadeId,
-                                          convidado['autorizante'] ??
-                                              convidado['pessoa_autorizou'] ??
-                                              '',
-                                          loadingKey: uniqueKey,
-                                        );
-                                      } else {
-                                        FeedbackUtils.showWarning(
-                                            context: context,
-                                            title: 'Unidade não identificada',
-                                            message:
-                                                'Não foi possível identificar a unidade. Use Nova Entrada.');
-                                      }
-                                    },
-                              color: Colors.blue,
-                            ),
-                        ]
-                      ]),
-                    ],
-                  ),
+                                          color: isDark
+                                              ? Colors.red.shade300
+                                              : Colors.red.shade900,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600)))
+                            ])
+                          : const SizedBox.shrink(),
+                    ),
+                    TransparentIconGroup(acoes),
+                  ],
                 ),
-
-              if (temErroFoto)
-                Padding(
+              ),
+            if (temErroFoto)
+              Padding(
                   padding: const EdgeInsets.only(top: 8, bottom: 8),
-                  child: Text(
-                    'Foto obrigatória para entrada!',
-                    style: TextStyle(
-                        color: Colors.red.shade700,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
-            ],
+                  child: Text('Foto obrigatória para entrada!',
+                      style: TextStyle(
+                          color: Colors.red.shade700,
+                          fontWeight: FontWeight.bold))),
+          ],
+        ),
+      );
+    }
+
+    // --- 3. NOVA FUNÇÃO: LINHA COMPACTA SEM BORDA PARA AGENDAMENTOS ---
+    Widget construirItemLinhaDoConvidado(Map<String, dynamic> convidado) {
+      final uniqueKey = convidado['id']?.toString() ??
+          convidado['reserva_id']?.toString() ??
+          convidado['pessoadocumento_id']?.toString() ??
+          '';
+
+      final reservaId = convidado['reserva_id']?.toString() ?? '';
+      final reservaconvidadoId =
+          convidado['reservaconvidado_id']?.toString() ?? '';
+
+      Map<String, dynamic>? dadosAtualizados;
+      if (reservaId.isNotEmpty &&
+          _convidadosPorReserva.containsKey(reservaId)) {
+        try {
+          dadosAtualizados = _convidadosPorReserva[reservaId]!.firstWhere(
+            (c) =>
+                c['reservaconvidado_id']?.toString() == reservaconvidadoId ||
+                c['id']?.toString() == reservaconvidadoId,
+          );
+        } catch (e) {}
+      }
+
+      final bool temRestricao =
+          (dadosAtualizados?['lista_restricao'] ?? convidado['lista_restricao'])
+                  ?.toString()
+                  .toUpperCase() ==
+              'S';
+      final motivolista_ds =
+          (dadosAtualizados?['motivolista_ds'] ?? convidado['motivolista_ds'])
+                  ?.toString() ??
+              '';
+
+      final nome = dadosAtualizados?['nome'] ??
+          dadosAtualizados?['convidado_txt'] ??
+          convidado['nome'] ??
+          'Nome não informado';
+
+      final documento = dadosAtualizados?['documento'] ??
+          dadosAtualizados?['documento_txt'] ??
+          convidado['documento'] ??
+          convidado['documento_txt'] ??
+          '';
+
+      String? fotoParaExibir = dadosAtualizados?['link_foto']?.toString() ??
+          convidado['link_foto']?.toString();
+      if (fotoParaExibir == null ||
+          fotoParaExibir.isEmpty ||
+          fotoParaExibir == 'null') {
+        fotoParaExibir = dadosAtualizados?['foto']?.toString() ??
+            convidado['foto']?.toString();
+      }
+      if (fotoParaExibir == 'null') fotoParaExibir = null;
+
+      final temErroFoto = _cardsComErroFoto.contains(uniqueKey);
+
+      final entradaStr = (dadosAtualizados?['entrada'] ??
+              dadosAtualizados?['dt_entrada'] ??
+              convidado['entrada'] ??
+              convidado['dt_entrada'] ??
+              '')
+          .toString();
+      final saidaStr = (dadosAtualizados?['saida'] ??
+              dadosAtualizados?['dt_saida'] ??
+              convidado['saida'] ??
+              convidado['dt_saida'] ??
+              '')
+          .toString();
+
+      bool jaDeuEntrada = entradaStr.isNotEmpty;
+      bool jaDeuSaida = saidaStr.isNotEmpty;
+
+      final objetoAcao = dadosAtualizados != null
+          ? {...convidado, ...dadosAtualizados}
+          : convidado;
+
+      Color photoBorderColor = Colors.transparent;
+      if (temRestricao)
+        photoBorderColor = Colors.red.shade700;
+      else if (temErroFoto)
+        photoBorderColor = Colors.red;
+      else if (jaDeuEntrada && !jaDeuSaida)
+        photoBorderColor = Colors.orange;
+      else if (jaDeuEntrada && jaDeuSaida) photoBorderColor = Colors.green;
+
+// ---------------------------------------------------------
+      // CONSTRUÇÃO DA PÍLULA
+      // ---------------------------------------------------------
+      Widget buildPillBtn(IconData icon, Color color, String tooltipMessage,
+          VoidCallback? onPressed) {
+        return Tooltip(
+          message: tooltipMessage,
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10.0, vertical: 6.0),
+              child: Icon(icon, color: color, size: 22),
+            ),
           ),
         );
+      }
+
+      final List<Widget> pillBtns = [];
+
+      // ÚNICO BOTÃO NA LISTA: ABRE O PAINEL DE EDIÇÃO E AÇÕES!
+      pillBtns.add(buildPillBtn(
+          Icons.edit_outlined, const Color(0xFFB388FF), 'Editar convidado', () {
+        abrirEdicaoNoPainel(objetoAcao);
+      }));
+
+      final pillWidget = Container(
+        decoration: BoxDecoration(
+          // Fundo alterado para branco para destacar no fundo cinza
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+              color: isDark ? Colors.grey.shade800 : Colors.grey.shade300),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: pillBtns,
+        ),
+      );
+
+      // Adicionando divisórias ("|") entre os ícones da pílula
+      final List<Widget> separatedBtns = [];
+      for (int i = 0; i < pillBtns.length; i++) {
+        separatedBtns.add(pillBtns[i]);
+        if (i < pillBtns.length - 1) {
+          separatedBtns.add(Container(
+              width: 1,
+              height: 18,
+              color: isDark ? Colors.grey.shade700 : Colors.grey.shade400));
+        }
+      }
+
+      // ---------------------------------------------------------
+
+      return Padding(
+        padding: const EdgeInsets.only(top: 8.0, bottom: 8.0, left: 16.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // 2. NOME E DOCUMENTO
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  GestureDetector(
+                    onTap: () =>
+                        setState(() => _revealedPii.add('${uniqueKey}_nome')),
+                    child: Text(
+                      _revealedPii.contains('${uniqueKey}_nome')
+                          ? nome
+                          : _maskName(nome),
+                      style: TextStyle(
+                        color: temRestricao
+                            ? (isDark
+                                ? Colors.red.shade300
+                                : Colors.red.shade900)
+                            : getTextColor(context),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (documento.isNotEmpty)
+                    GestureDetector(
+                      onTap: () =>
+                          setState(() => _revealedPii.add('${uniqueKey}_doc')),
+                      child: Text(
+                        _revealedPii.contains('${uniqueKey}_doc')
+                            ? documento
+                            : _maskDocument(documento),
+                        style: TextStyle(
+                            color: getSecondaryTextColor(context),
+                            fontSize: 13),
+                      ),
+                    ),
+                  if (temRestricao && motivolista_ds.isNotEmpty)
+                    Text('Restrição: $motivolista_ds',
+                        style: TextStyle(
+                            color: Colors.red.shade700,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  if (temErroFoto)
+                    Text('Foto obrigatória!',
+                        style: TextStyle(
+                            color: Colors.red.shade700,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+
+            // 3. PILL MENU DE AÇÕES
+            pillWidget,
+          ],
+        ),
+      );
+    }
+
+    // --- RENDERIZAÇÃO PRINCIPAL ---
+
+    // MODO AGENDAMENTOS: ESTRUTURA DE ÁRVORE COM LINHAS COMPACTAS
+    if (_tabAvulsoAgendamentosSaidas == 1) {
+      final Map<String, List<Map<String, dynamic>>> agrupadosPorUnidade = {};
+      for (var c in filteredList) {
+        final unidade =
+            (c['unidade_mostra'] ?? c['unidade'] ?? 'Sem Unidade').toString();
+        if (!agrupadosPorUnidade.containsKey(unidade)) {
+          agrupadosPorUnidade[unidade] = [];
+        }
+        agrupadosPorUnidade[unidade]!.add(c);
+      }
+
+      return ListView.builder(
+        shrinkWrap: true,
+        physics: const ClampingScrollPhysics(),
+        itemCount: agrupadosPorUnidade.keys.length,
+        itemBuilder: (context, index) {
+          final unidade = agrupadosPorUnidade.keys.elementAt(index);
+          final convidadosDaUnidade = agrupadosPorUnidade[unidade]!;
+
+          // Agrupa por Espaço/Data dentro da Unidade
+          final Map<String, List<Map<String, dynamic>>> agrupadosPorEspaco = {};
+          for (var c in convidadosDaUnidade) {
+            final espaco =
+                (c['reserva_tipo_txt'] ?? c['destino'] ?? 'Espaço').toString();
+            final dtIni = (c['reserva_dt_ini'] ?? c['dt_ini'] ?? '').toString();
+            final dtFim = (c['reserva_dt_fim'] ?? c['dt_fim'] ?? '').toString();
+            final reservaId = (c['reserva_id'] ?? c['id_pai'] ?? '').toString();
+            final chave = '$espaco|$dtIni|$dtFim|$reservaId';
+            if (!agrupadosPorEspaco.containsKey(chave)) {
+              agrupadosPorEspaco[chave] = [];
+            }
+            agrupadosPorEspaco[chave]!.add(c);
+          }
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              // Fundo cinza semelhante ao da imagem
+              color: isDark
+                  ? Color(0xff393E44)
+                  : const Color.fromARGB(255, 245, 245, 245),
+              borderRadius: BorderRadius.circular(12),
+              // Borda verde
+              border: Border.all(color: const Color(0xFF388E3C), width: 2),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(unidade,
+                    style: TextStyle(
+                        fontSize: 16, // Ajustado para a proporção da imagem
+                        fontWeight: FontWeight.w600,
+                        color: getTextColor(context))),
+                const SizedBox(
+                    height: 8), // Trocamos o const Divider() por um espaçamento
+                ...agrupadosPorEspaco.entries.map((entry) {
+                  final chaves = entry.key.split('|');
+
+                  final nomeEspaco = chaves[0];
+                  final dtIni = chaves[1];
+                  final dtFim = chaves[2];
+                  final reservaId = chaves[3];
+                  // 👇 1. FILTRO: Remove convidados com nome "Não Informado"
+                  final convidadosValidos = entry.value.where((c) {
+                    final nome = (c['nome'] ??
+                            c['convidado_txt'] ??
+                            c['pessoa_ds'] ??
+                            '')
+                        .toString()
+                        .trim()
+                        .toLowerCase();
+
+                    // Ignora se for vazio ou qualquer variação de não informado
+                    return nome.isNotEmpty &&
+                        nome != 'não informado' &&
+                        nome != 'nao informado' &&
+                        nome != 'nome não informado';
+                  }).toList();
+
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 12.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 2. TÍTULO DO ESPAÇO + BOTÃO (+) LADO A LADO
+
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                      nomeEspaco +
+                                          ' :: ' +
+                                          reservaId, // Nome do Espaço
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: getTextColor(context))),
+                                  if (dtIni.isNotEmpty || dtFim.isNotEmpty)
+                                    Text('${dtIni} a ${dtFim}', // Datas
+                                        style: TextStyle(
+                                            color:
+                                                getSecondaryTextColor(context),
+                                            fontSize: 14)),
+                                ],
+                              ),
+                            ),
+                            // 👇 Botão de Adicionar Convidado explícito em pílula
+
+                            Tooltip(
+                              message: 'Novo Convidado',
+                              child: InkWell(
+                                onTap: () {
+                                  if (entry.value.isNotEmpty) {
+                                    // Clona os dados da reserva, mas zera as infos do convidado
+                                    final base = Map<String, dynamic>.from(
+                                        entry.value.first);
+                                    base['id'] = 0;
+                                    base['reservaconvidado_id'] = 0;
+                                    base['nome'] = '';
+                                    base['documento'] = '';
+                                    base['tipo'] = 'AG_EMPTY';
+
+                                    // Chama o painel lateral em modo de criação
+                                    abrirEdicaoNoPainel(base);
+                                  }
+                                },
+                                borderRadius: BorderRadius.circular(20),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF00C853)
+                                        .withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: const Color(0xFF00C853)
+                                          .withValues(alpha: 0.4),
+                                    ),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.add,
+                                          color: Color(0xFF00C853), size: 16),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+
+                        // 👇 3. LISTA DE CONVIDADOS (Somente os válidos)
+                        ...convidadosValidos
+                            .map((c) => construirItemLinhaDoConvidado(c))
+                            .toList(),
+
+                        // Feedback caso só existisse o "Não Informado" na lista
+                        if (convidadosValidos.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                                left: 16.0, bottom: 8.0, top: 4.0),
+                            child: Text('Nenhum convidado adicionado.',
+                                style: TextStyle(
+                                    color: getSecondaryTextColor(context),
+                                    fontStyle: FontStyle.italic,
+                                    fontSize: 13)),
+                          ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
+    // MODO AVULSO: LISTA PLANA COM CARDS GRANDES
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const ClampingScrollPhysics(),
+      itemCount: filteredList.length,
+      itemBuilder: (context, index) {
+        return construirCardDoConvidado(filteredList[index]);
       },
     );
   }
@@ -3739,7 +3855,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Layout responsivo com scroll interno
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 800;
-
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    Color textColor = isDark
+        ? Color.lerp(Color(0xFF00C853), Colors.white, 0.3)!
+        : Color.lerp(Color(0xFF00C853), Colors.black, 0.2)!;
     return Container(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.8,
@@ -3748,42 +3867,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           children: [
             // Mensagem para novo usuário ou agendamento
-            if (_isNovoUsuario || _isAgendamento)
+// Cabeçalho para feedback visual de estado
+            if (_isNovoUsuario || _isAgendamento || _temCadastroAvulso)
               Container(
                 width: double.infinity,
                 margin: const EdgeInsets.only(bottom: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: _isAgendamento
-                      ? Colors.green.shade50
-                      : Colors.blue.shade50,
+                  color: isDark
+                      ? const Color(0xFF00C853).withOpacity(0.15)
+                      : const Color(0xFF00C853).withOpacity(0.08),
                   border: Border.all(
-                      color: _isAgendamento
-                          ? Colors.green.shade200
-                          : Colors.blue.shade200),
+                      color: const Color(0xFF00C853).withOpacity(0.15)),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   children: [
                     Icon(
                       _isAgendamento ? Icons.event : Icons.badge,
-                      color: _isAgendamento
-                          ? Colors.green.shade600
-                          : Colors.blue.shade600,
+                      color: textColor,
                     ),
                     const SizedBox(width: 8),
                     Text(
                       _isAgendamento
                           ? 'Editando Agendamento - ${_unidadeAgendamento ?? ''}'
-                          : (_tipoPessoa == 0
-                              ? 'Novo Prestador'
-                              : 'Novo Visitante'),
+                          : _isNovoUsuario
+                              ? (_tipoPessoa == 0
+                                  ? 'Novo Prestador'
+                                  : 'Novo Visitante')
+                              : 'Cadastro Localizado', // 👈 Feedback claro para o porteiro!
                       style: TextStyle(
-                        color: _isAgendamento
-                            ? Colors.green.shade800
-                            : Colors.blue.shade800,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -3933,6 +4049,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       // Unidade
                       LayoutBuilder(builder: (context, constraints) {
                         return buildStandardAutocomplete<Map<String, dynamic>>(
+                          key: const ValueKey('form_entrada_unidade'),
                           context: context,
                           labelText: 'Unidade',
                           items: _unidadesList,
@@ -4063,6 +4180,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       // Terceira linha: Unidade e Saída
                       LayoutBuilder(builder: (context, constraints) {
                         return buildStandardAutocomplete<Map<String, dynamic>>(
+                          key: const ValueKey('form_entrada_unidade'),
                           context: context,
                           labelText: 'Unidade',
                           items: _unidadesList,
@@ -4242,6 +4360,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           : LayoutBuilder(builder: (context, constraints) {
                               return buildStandardAutocomplete<
                                   Map<String, dynamic>>(
+                                key: const ValueKey('form_entrada_marca'),
                                 context: context,
                                 labelText:
                                     _selectedCor != null ? 'Marca *' : 'Marca',
@@ -4297,6 +4416,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 return buildStandardAutocomplete<
                                     Map<String, dynamic>>(
                                   context: context,
+                                  key: const ValueKey('form_entrada_marca'),
                                   labelText: _selectedCor != null
                                       ? 'Marca *'
                                       : 'Marca',
@@ -4374,6 +4494,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           : LayoutBuilder(builder: (context, constraints) {
                               return buildStandardAutocomplete<
                                   Map<String, dynamic>>(
+                                key: const ValueKey('form_entrada_cor'),
                                 context: context,
                                 labelText:
                                     _selectedMarca != null ? 'Cor *' : 'Cor',
@@ -4431,6 +4552,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 return buildStandardAutocomplete<
                                     Map<String, dynamic>>(
                                   context: context,
+                                  key: const ValueKey('form_entrada_cor'),
                                   labelText:
                                       _selectedMarca != null ? 'Cor *' : 'Cor',
                                   items: _coresList,
@@ -4466,6 +4588,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               return buildStandardAutocomplete<
                                   Map<String, dynamic>>(
                                 context: context,
+                                key: const ValueKey('form_entrada_vaga'),
                                 labelText: 'Vaga',
                                 items: _vagasAvulsoList,
                                 itemAsString: (v) {
@@ -4571,6 +4694,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 return buildStandardAutocomplete<
                                     Map<String, dynamic>>(
                                   context: context,
+                                  key: const ValueKey('form_entrada_cracha'),
                                   labelText: 'Crachá',
                                   items: _crachasList,
                                   itemAsString: (c) {
@@ -4695,7 +4819,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(height: 12),
                     Row(
                       children: [
-                        // Foto do rosto
+                        // ============================================================
+                        // FOTO DO ROSTO
+                        // ============================================================
                         if (_fotoRostoEntrada != null)
                           Expanded(
                             child: Column(
@@ -4712,8 +4838,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   height: 120,
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(8),
-                                    border:
-                                        Border.all(color: Colors.grey.shade300),
+                                    border: Border.all(
+                                      color: Colors.grey.shade300,
+                                    ),
                                   ),
                                   child: RepaintBoundary(
                                     child: ClipRRect(
@@ -4723,8 +4850,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           ? Image.network(
                                               _fotoRostoEntrada!,
                                               fit: BoxFit.cover,
-                                              errorBuilder:
-                                                  (context, error, stackTrace) {
+                                              gaplessPlayback: true,
+                                              errorBuilder: (
+                                                context,
+                                                error,
+                                                stackTrace,
+                                              ) {
                                                 return Container(
                                                   color: Colors.grey.shade100,
                                                   child: const Icon(
@@ -4735,21 +4866,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                 );
                                               },
                                             )
-                                          : () {
-                                              final bytes = _safeBase64Decode(
-                                                  _fotoRostoEntrada);
-                                              if (bytes != null) {
-                                                return Image.memory(
-                                                  bytes,
+                                          : _fotoEntrada != null
+                                              ? Image.memory(
+                                                  _fotoEntrada!,
                                                   fit: BoxFit.cover,
-                                                  frameBuilder: (context,
-                                                      child,
-                                                      frame,
-                                                      wasSynchronouslyLoaded) {
-                                                    return child; // Sem animaçao para evitar piscar
+                                                  gaplessPlayback: true,
+                                                  frameBuilder: (
+                                                    context,
+                                                    child,
+                                                    frame,
+                                                    wasSynchronouslyLoaded,
+                                                  ) {
+                                                    return child;
                                                   },
-                                                  errorBuilder: (context, error,
-                                                      stackTrace) {
+                                                  errorBuilder: (
+                                                    context,
+                                                    error,
+                                                    stackTrace,
+                                                  ) {
                                                     return Container(
                                                       color:
                                                           Colors.grey.shade100,
@@ -4760,17 +4894,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                       ),
                                                     );
                                                   },
-                                                );
-                                              }
-                                              return Container(
-                                                color: Colors.grey.shade100,
-                                                child: const Icon(
-                                                  Icons.person_outline,
-                                                  color: Colors.grey,
-                                                  size: 40,
+                                                )
+                                              : Container(
+                                                  color: Colors.grey.shade100,
+                                                  child: const Icon(
+                                                    Icons.person_outline,
+                                                    color: Colors.grey,
+                                                    size: 40,
+                                                  ),
                                                 ),
-                                              );
-                                            }(),
                                     ),
                                   ),
                                 ),
@@ -4778,11 +4910,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           ),
 
+                        // Espaçamento entre as fotos
                         if (_fotoRostoEntrada != null &&
                             _fotoDocumentoEntrada != null)
                           const SizedBox(width: 12),
 
-                        // Foto do documento
+                        // ============================================================
+                        // FOTO DO DOCUMENTO
+                        // ============================================================
                         if (_fotoDocumentoEntrada != null)
                           Expanded(
                             child: Column(
@@ -4799,8 +4934,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   height: 120,
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(8),
-                                    border:
-                                        Border.all(color: Colors.grey.shade300),
+                                    border: Border.all(
+                                      color: Colors.grey.shade300,
+                                    ),
                                   ),
                                   child: RepaintBoundary(
                                     child: ClipRRect(
@@ -4810,8 +4946,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           ? Image.network(
                                               _fotoDocumentoEntrada!,
                                               fit: BoxFit.cover,
-                                              errorBuilder:
-                                                  (context, error, stackTrace) {
+                                              gaplessPlayback: true,
+                                              errorBuilder: (
+                                                context,
+                                                error,
+                                                stackTrace,
+                                              ) {
                                                 return Container(
                                                   color: Colors.grey.shade100,
                                                   child: const Icon(
@@ -4823,21 +4963,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                 );
                                               },
                                             )
-                                          : () {
-                                              final bytes = _safeBase64Decode(
-                                                  _fotoDocumentoEntrada);
-                                              if (bytes != null) {
-                                                return Image.memory(
-                                                  bytes,
+                                          : _fotoDocumento != null
+                                              ? Image.memory(
+                                                  _fotoDocumento!,
                                                   fit: BoxFit.cover,
-                                                  frameBuilder: (context,
-                                                      child,
-                                                      frame,
-                                                      wasSynchronouslyLoaded) {
-                                                    return child; // Sem animaçao para evitar piscar
+                                                  gaplessPlayback: true,
+                                                  frameBuilder: (
+                                                    context,
+                                                    child,
+                                                    frame,
+                                                    wasSynchronouslyLoaded,
+                                                  ) {
+                                                    return child;
                                                   },
-                                                  errorBuilder: (context, error,
-                                                      stackTrace) {
+                                                  errorBuilder: (
+                                                    context,
+                                                    error,
+                                                    stackTrace,
+                                                  ) {
                                                     return Container(
                                                       color:
                                                           Colors.grey.shade100,
@@ -4849,18 +4992,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                       ),
                                                     );
                                                   },
-                                                );
-                                              }
-                                              return Container(
-                                                color: Colors.grey.shade100,
-                                                child: const Icon(
-                                                  Icons
-                                                      .document_scanner_outlined,
-                                                  color: Colors.grey,
-                                                  size: 40,
+                                                )
+                                              : Container(
+                                                  color: Colors.grey.shade100,
+                                                  child: const Icon(
+                                                    Icons
+                                                        .document_scanner_outlined,
+                                                    color: Colors.grey,
+                                                    size: 40,
+                                                  ),
                                                 ),
-                                              );
-                                            }(),
                                     ),
                                   ),
                                 ),
@@ -4868,7 +5009,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           ),
                       ],
-                    ),
+                    )
                   ],
                 ),
               ),
@@ -4978,7 +5119,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _getTodasPassagensFiltradas() {
+  List<Map<String, dynamic>> _getTodasPassagensFiltradas1() {
     // Se não há filtros, não retornar nada (apagar resultados ao limpar)
     if (_filtroNomeSaidasController.text.trim().isEmpty &&
         _filtroDocumentoSaidasController.text.trim().isEmpty &&
@@ -5060,21 +5201,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
   // Painel 2 - Passagens / Histórico
 
-  // Conteúdo das passagens (sem cabeá§alho segmented)
+  List<Map<String, dynamic>> _getSaidasPendentesFiltradas() {
+    if (_filtroNomeSaidasController.text.trim().isEmpty &&
+        _filtroDocumentoSaidasController.text.trim().isEmpty &&
+        _filtroPlacaSaidasController.text.trim().isEmpty &&
+        _filtroUnidadeSaidasController.text.trim().isEmpty &&
+        _filtroDataInicioSaidas == null &&
+        _filtroDataFimSaidas == null) {
+      return _saidasPendentes; // 👈 Consome apenas o estado isolado
+    }
+
+    return _saidasPendentes.where((passagem) {
+      if (_filtroNomeSaidasController.text.trim().isNotEmpty) {
+        final nome = (passagem['nome'] ?? '').toString().toLowerCase();
+        if (!nome
+            .contains(_filtroNomeSaidasController.text.trim().toLowerCase()))
+          return false;
+      }
+      if (_filtroDocumentoSaidasController.text.trim().isNotEmpty) {
+        final documento =
+            (passagem['documento'] ?? '').toString().toLowerCase();
+        if (!documento.contains(
+            _filtroDocumentoSaidasController.text.trim().toLowerCase()))
+          return false;
+      }
+      if (_filtroPlacaSaidasController.text.trim().isNotEmpty) {
+        final placa = (passagem['placa'] ?? '').toString().toLowerCase();
+        if (!placa
+            .contains(_filtroPlacaSaidasController.text.trim().toLowerCase()))
+          return false;
+      }
+      if (_filtroUnidadeSaidasController.text.trim().isNotEmpty) {
+        final torre = (passagem['torre'] ?? '').toString().toLowerCase();
+        final numero = (passagem['numero'] ?? '').toString().toLowerCase();
+        final unidade = '$torre $numero'.trim().toLowerCase();
+        if (!unidade
+            .contains(_filtroUnidadeSaidasController.text.trim().toLowerCase()))
+          return false;
+      }
+      return true;
+    }).toList();
+  }
+
+// Conteúdo das passagens (sem cabeçalho segmented)
   Widget _passagensHistoricoContent() {
     return Expanded(
       child: Column(
         children: [
-          // Filtros sempre visíveis para passagens (com key para evitar rebuilds incorretos)
-          // Filtros de histórico inline
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: getFormGrisColor(context),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: getBorderColor(context)),
-            ),
-            child: Column(
+          // Filtros de histórico com o componente sanfona AZUL
+          FilterTab(
+            title: 'Filtros de Passagens',
+            themeColor: const Color(0xFF2196F3), // Azul da aba Passagens
+            icon: Icons.tune,
+            initiallyExpanded: false,
+            content: Column(
               children: [
                 // Primeira linha: Documento (linha inteira)
                 Row(
@@ -5086,7 +5266,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         maxLength: 14,
                         decoration: inputDecorationPadrao(context,
                             hintText: 'Documento'),
-                        onSubmitted: (_) => _buscarHistoricoFiltrado(),
+                        onSubmitted: (_) => _buscarHistoricoFiltrado(false),
                       ),
                     ),
                   ],
@@ -5102,7 +5282,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         maxLength: 50,
                         decoration: inputDecorationPadrao(context,
                             hintText: 'Nome e Sobrenome'),
-                        onSubmitted: (_) => _buscarHistoricoFiltrado(),
+                        onSubmitted: (_) => _buscarHistoricoFiltrado(false),
                       ),
                     ),
                   ],
@@ -5118,7 +5298,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         maxLength: 20,
                         decoration:
                             inputDecorationPadrao(context, hintText: 'Unidade'),
-                        onSubmitted: (_) => _buscarHistoricoFiltrado(),
+                        onSubmitted: (_) => _buscarHistoricoFiltrado(false),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -5129,13 +5309,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         maxLength: 7,
                         decoration:
                             inputDecorationPadrao(context, hintText: 'Placa'),
-                        onSubmitted: (_) => _buscarHistoricoFiltrado(),
+                        onSubmitted: (_) => _buscarHistoricoFiltrado(false),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                // Terceira linha: Período
+                // Quarta linha: Período
                 _buildPeriodFilter(
                   context: context,
                   startDate: _filtroDataInicioHistorico,
@@ -5146,7 +5326,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       setState(() => _filtroDataFimHistorico = date),
                 ),
                 const SizedBox(height: 12),
-                // Botões de açao
+                // Botões de ação
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -5164,7 +5344,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             _filtroDataInicioHistorico = null;
                             _filtroDataFimHistorico = null;
                           });
-                          _buscarHistoricoFiltrado();
+                          _buscarHistoricoFiltrado(false);
                         },
                       ),
                       IconActionData(
@@ -5173,7 +5353,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         color: IconColors.search(context),
                         onPressed: _loadingHistorico
                             ? null
-                            : () => _buscarHistoricoFiltrado(),
+                            : () => _buscarHistoricoFiltrado(false),
                       ),
                     ]),
                   ],
@@ -5197,7 +5377,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           final destino = passagem['destino'] ?? '';
                           final nome =
                               (passagem['nome'] ?? 'Visitante').toString();
-                          final unidade = '';
+                          final tipo_visita =
+                              (passagem['tipo_visita'] ?? '').toString();
+                          String tipo_visita_ds = "Visitante";
+                          if (tipo_visita == "P") {
+                            tipo_visita_ds = "Prestador Serviço";
+                          }
 
                           final leitor =
                               (passagem['leitor_ds'] ?? '').toString();
@@ -5216,7 +5401,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             context: context,
                             title: nome,
                             subtitle:
-                                'destino: ${unidade.isNotEmpty ? unidade : ' '}',
+                                '${destino.isNotEmpty ? destino : ' '} - $tipo_visita_ds',
                             photoBase64:
                                 (passagem['link_foto'] ?? passagem['foto'])
                                     ?.toString(),
@@ -5234,7 +5419,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ),
                                 if (data.isNotEmpty)
                                   Padding(
-                                    padding: const EdgeInsets.only(top: 4.0),
+                                    padding: const EdgeInsets.only(top: 2.0),
                                     child: Text(
                                       'E: $data',
                                       style: const TextStyle(
@@ -5265,24 +5450,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
-
   // Painel 2 - Passagens
 
   Widget _saidasList() {
     return Expanded(
       child: Column(
         children: [
-          // Formulário de saída (sempre visível com key para evitar rebuilds)
+          // Formulário de saída (agora com o FilterTab sanfona Verde)
           RepaintBoundary(
             key: const ValueKey('filtros_saidas'),
-            child: Container(
-              decoration: BoxDecoration(
-                color: getFormGrisColor(context),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: getBorderColor(context)),
-              ),
-              padding: const EdgeInsets.all(16),
-              child: Column(
+            child: FilterTab(
+              title: 'Filtros de Saídas',
+              themeColor:
+                  const Color(0xFF00C853), // Verde (padrão desta coluna)
+              icon: Icons.tune,
+              initiallyExpanded: false,
+              content: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -5369,7 +5552,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Quarta linha: Botões de açao
+                  // Quarta linha: Botões de ação
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -5386,12 +5569,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             setState(() {
                               _filtroDataInicioSaidas = null;
                               _filtroDataFimSaidas = null;
-                              // Limpar lista de resultados ao limpar filtros
-                              _historicoFiltrado.clear();
-                              _todasPassagens
-                                  .clear(); // Correção: remove os resultados visíveis
                             });
-                            // _fetchPassagens(); // Desativado - passagens vêm do SignalR
+                            _buscarSaidasFiltradas(); // 👈 Refaz a busca dos que estão dentro
                           },
                         ),
                         IconActionData(
@@ -5423,7 +5602,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           const SizedBox(height: 12),
 
-          // Botá£o de baixa em lote quando há itens selecionados
+          // Botão de baixa em lote quando há itens selecionados
           if (_modoAutoBaixa && _itensSelecionados.isNotEmpty) ...[
             SizedBox(
               width: double.infinity,
@@ -5463,13 +5642,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Expanded(
             child: _loadingSaidasList
                 ? const Center(child: CircularProgressIndicator())
-                : _getTodasPassagensFiltradas().isEmpty
+                : _getSaidasPendentesFiltradas().isEmpty // 👈 ALTERADO
                     ? const SizedBox.shrink()
                     : ListView.separated(
-                        itemCount: _getTodasPassagensFiltradas().length,
+                        itemCount: _getSaidasPendentesFiltradas()
+                            .length, // 👈 ALTERADO
                         separatorBuilder: (_, __) => const SizedBox.shrink(),
                         itemBuilder: (context, index) {
-                          final passagem = _getTodasPassagensFiltradas()[index];
+                          final passagem = _getSaidasPendentesFiltradas()[
+                              index]; // 👈 ALTERADO
                           final temSaida = (passagem['dt_saida'] ?? '')
                               .toString()
                               .isNotEmpty;
@@ -5879,426 +6060,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _mediaBox(
-      {required String label, required IconData icon, VoidCallback? onTap}) {
-    // Verificar se há foto capturada
-    final hasPhoto = (label == 'Foto do Rosto' && _fotoEntrada != null) ||
-        (label == 'Foto do Documento' && _fotoDocumento != null) ||
-        (label == 'Foto Encomenda' && _fotoEncomenda != null);
-
-    // Funçao para remover foto baseada no tipo
-    void removerFoto() {
-      setState(() {
-        if (label == 'Foto do Rosto') {
-          _fotoEntrada = null;
-        } else if (label == 'Foto do Documento') {
-          _fotoDocumento = null;
-        } else if (label == 'Foto Encomenda') {
-          _fotoEncomenda = null;
-        }
-      });
-    }
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 120, // Largura fixa
-        height: 120, // Altura fixa - garante quadrado perfeito
-        decoration: BoxDecoration(
-          color: getCardColor(context),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: getBorderColor(context)),
-        ),
-        child: Stack(
-          children: [
-            // Verificar se é foto do rosto, documento ou encomenda e exibir imagem se capturada
-            if (label == 'Foto do Rosto' && _fotoEntrada != null) ...[
-              Positioned.fill(
-                child: RepaintBoundary(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        image: DecorationImage(
-                          image: MemoryImage(_fotoEntrada!),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ] else if (label == 'Foto do Documento' &&
-                _fotoDocumento != null) ...[
-              Positioned.fill(
-                child: RepaintBoundary(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        image: DecorationImage(
-                          image: MemoryImage(_fotoDocumento!),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ] else if (label == 'Foto Encomenda' && _fotoEncomenda != null) ...[
-              Positioned.fill(
-                child: RepaintBoundary(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        image: DecorationImage(
-                          image: MemoryImage(_fotoEncomenda!),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ] else ...[
-              Positioned.fill(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(icon, color: getSecondaryTextColor(context), size: 36),
-                    const SizedBox(height: 6),
-                    Text(label,
-                        style:
-                            TextStyle(color: getSecondaryTextColor(context))),
-                  ],
-                ),
-              ),
-            ],
-
-            // Botao X para remover foto quando houver foto
-            if (hasPhoto) ...[
-              Positioned(
-                top: 8,
-                right: 8,
-                child: GestureDetector(
-                  onTap: removerFoto,
-                  child: Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.close,
-                      color: Colors.white,
-                      size: 16,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-
-            // Texto "Foto Capturada" quando houver foto
-            if (hasPhoto) ...[
-              Positioned(
-                bottom: 4,
-                left: 0,
-                right: 0,
-                child: Text(
-                  'Foto Capturada',
-                  style: TextStyle(
-                      color: isDarkMode(context)
-                          ? Colors.green.shade400
-                          : Colors.green.shade600,
-                      fontSize: 12),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _agendamentosList() {
-    return Expanded(
-      child: Column(
-        children: [
-          // área de filtros - seguindo padrão da tela
-          Container(
-            decoration: BoxDecoration(
-              color: getFormGrisColor(context),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: getBorderColor(context)),
-            ),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                // Primeira linha de filtros
-                Row(
-                  children: [
-                    Expanded(
-                      child: buildStandardAutocomplete<Map<String, dynamic>>(
-                        context: context,
-                        labelText: 'Unidade',
-                        items: _unidadesList,
-                        itemAsString: (option) =>
-                            unidadeLabelComMorador(option),
-                        selectedItem: _selectedUnidadeAgendamento,
-                        onSelected: (value) {
-                          setState(() {
-                            _selectedUnidadeAgendamento = value;
-                            if (_selectedUnidadeAgendamento != null &&
-                                _selectedUnidadeAgendamento!.isNotEmpty) {
-                              _autorizanteAgendamentoController.text =
-                                  _selectedUnidadeAgendamento!['nome'] ?? '';
-                            } else {
-                              _autorizanteAgendamentoController.clear();
-                            }
-                          });
-                        },
-                        // ✅ Altura máxima controlada para evitar o erro de tela cinza
-                        constraints: const BoxConstraints(maxHeight: 250),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: LayoutBuilder(builder: (context, constraints) {
-                        return Autocomplete<Map<String, String>>(
-                          initialValue: TextEditingValue(
-                            text: _tipoAgendamentoSelecionado != null
-                                ? (_tipoAgendamentoSelecionado!['descricao'] ??
-                                    '')
-                                : '',
-                          ),
-                          optionsBuilder: (TextEditingValue textEditingValue) {
-                            if (textEditingValue.text.isEmpty) {
-                              return tiposAgendamentoFixos;
-                            }
-                            return tiposAgendamentoFixos
-                                .where((Map<String, String> option) {
-                              return (option['descricao'] ?? '')
-                                  .toLowerCase()
-                                  .contains(
-                                      textEditingValue.text.toLowerCase());
-                            });
-                          },
-                          displayStringForOption:
-                              (Map<String, String> option) =>
-                                  option['descricao'] ?? '',
-                          onSelected: (Map<String, String> value) {
-                            setState(() {
-                              _tipoAgendamentoSelecionado = value;
-                            });
-                          },
-                          fieldViewBuilder: (context, textEditingController,
-                              focusNode, onFieldSubmitted) {
-                            return TextField(
-                              controller: textEditingController,
-                              focusNode: focusNode,
-                              decoration: inputDecorationPadrao(context,
-                                      hintText: 'Tipo')
-                                  .copyWith(
-                                suffixIcon: textEditingController
-                                        .text.isNotEmpty
-                                    ? IconButton(
-                                        icon: Icon(Icons.close,
-                                            size: 20,
-                                            color:
-                                                getSecondaryTextColor(context)),
-                                        onPressed: () {
-                                          textEditingController.clear();
-                                          setState(() {
-                                            _tipoAgendamentoSelecionado = null;
-                                          });
-                                        },
-                                      )
-                                    : null,
-                              ),
-                            );
-                          },
-                          optionsViewBuilder: (context, onSelected, options) {
-                            return Align(
-                              alignment: Alignment.topLeft,
-                              child: Material(
-                                elevation: 4,
-                                borderRadius: BorderRadius.circular(8),
-                                color: getCardColor(context),
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxHeight: 200,
-                                    maxWidth: constraints.maxWidth,
-                                  ),
-                                  child: ListView.builder(
-                                    padding: EdgeInsets.zero,
-                                    shrinkWrap: true,
-                                    itemCount: options.length,
-                                    itemBuilder:
-                                        (BuildContext context, int index) {
-                                      final Map<String, String> option =
-                                          options.elementAt(index);
-                                      return InkWell(
-                                        onTap: () => onSelected(option),
-                                        child: Container(
-                                          padding: const EdgeInsets.all(12),
-                                          decoration: BoxDecoration(
-                                            border: Border(
-                                              bottom: BorderSide(
-                                                color: getBorderColor(context)
-                                                    .withValues(alpha: 0.5),
-                                                width: 0.5,
-                                              ),
-                                            ),
-                                          ),
-                                          child: Text(
-                                            option['descricao'] ?? '',
-                                            style: TextStyle(
-                                                color: getTextColor(context),
-                                                fontSize: 12),
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        );
-                      }),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Terceira linha: Período (ocupando largura total)
-                _buildPeriodFilter(
-                  context: context,
-                  startDate: _filtroDataInicioSelecionada,
-                  endDate: _filtroDataFimSelecionada,
-                  onStartDateChanged: (date) =>
-                      setState(() => _filtroDataInicioSelecionada = date),
-                  onEndDateChanged: (date) =>
-                      setState(() => _filtroDataFimSelecionada = date),
-                ),
-                const SizedBox(height: 12),
-
-                // Quarta linha: Botões de açao
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TransparentIconGroup([
-                      IconActionData(
-                        icon: Symbols.ink_eraser,
-                        tooltip: 'Limpar filtros',
-                        color: IconColors.delete(context),
-                        onPressed: () {
-                          setState(() {
-                            _selectedUnidadeAgendamento = null;
-                            _tipoAgendamentoSelecionado = null;
-                            _filtroDataInicioSelecionada = null;
-                            _filtroDataFimSelecionada = null;
-                          });
-                          _fetchAgendamentos(isFiltro: false);
-                        },
-                        isLoading: _loadingAgendamentos,
-                      ),
-                      IconActionData(
-                        icon: Symbols.search,
-                        tooltip: 'Buscar agendamentos',
-                        color: IconColors.search(context),
-                        onPressed: () => _fetchAgendamentos(isFiltro: true),
-                        isLoading: _loadingAgendamentos,
-                      ),
-                      IconActionData(
-                        icon: Symbols.assignment,
-                        tooltip: 'Filtrar',
-                        color:
-                            isDarkMode(context) ? Colors.white : Colors.black87,
-                        onPressed: () {},
-                      ),
-                    ]),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: _loadingAgendamentos
-                ? const Center(child: CircularProgressIndicator())
-                : _getFilteredAgendamentos().isEmpty
-                    ? const SizedBox.shrink()
-                    : ListView.separated(
-                        itemCount: _getFilteredAgendamentos().length,
-                        separatorBuilder: (_, __) => const SizedBox.shrink(),
-                        itemBuilder: (context, index) {
-                          final agendamento = _getFilteredAgendamentos()[index];
-                          final convidados = _quantidadeConvidados[
-                                  agendamento['reserva_id']?.toString()] ??
-                              0;
-                          return _listItem(
-                            leading: Icons.apartment_rounded,
-                            title:
-                                '${agendamento['espacopublico_ds'] ?? agendamento['unidade'] ?? 'Agendamento'}  Â·  ${agendamento['usuariosolicita_ds'] ?? 'Solicitante'}',
-                            subtitle:
-                                '${agendamento['unidade_res'] ?? 'Unidade'}',
-                            extra: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'De: ${agendamento['dt_reserva_ini'] ?? agendamento['data_inicio'] ?? ''}',
-                                  style: const TextStyle(color: Colors.blue),
-                                ),
-                                Text(
-                                  'Até: ${agendamento['dt_reserva_fim'] ?? agendamento['data_fim'] ?? ''}',
-                                  style: const TextStyle(color: Colors.blue),
-                                ),
-                                if (convidados > 0)
-                                  Text(
-                                    'Convidados: $convidados',
-                                    style: const TextStyle(color: Colors.green),
-                                  ),
-                              ],
-                            ),
-                            trailing: convidados > 0
-                                ? MouseRegion(
-                                    cursor: SystemMouseCursors.click,
-                                    child: GestureDetector(
-                                      onTap: () {
-                                        final reservaId =
-                                            agendamento['reserva_id'];
-                                        if (reservaId != null) {
-                                          _abrirSidePanelConvidados(
-                                            reservaId.toString(),
-                                            titulo:
-                                                '${agendamento['espacopublico_ds'] ?? 'Agendamento'}\nUnidade: ${agendamento['unidade_res'] ?? 'Não informado'} - Solicitante: ${agendamento['usuariosolicita_ds'] ?? 'Não informado'}',
-                                          );
-                                        }
-                                      },
-                                      child: CircleIconWithBadge(
-                                        Icons.group,
-                                        '$convidados',
-                                        color: const Color(0xFF7C4DFF),
-                                      ),
-                                    ),
-                                  )
-                                : CircleIconWithBadge(
-                                    Icons.group,
-                                    '0',
-                                    color: const Color(0xFFBDBDBD),
-                                  ),
-                          );
-                        },
-                      ),
-          ),
-        ],
-      ),
-    );
-  }
-
   List<Map<String, dynamic>> _getFilteredAgendamentos() {
     // No backup, a filtragem é feita via API, não localmente
     // Retorna todos os agendamentos (já ordenados e limitados na API)
@@ -6319,111 +6080,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
               'Vagas do condomínio'
             ],
             selected: _tabUnidades!,
-            hasFocus: _grupoEmFoco == 'Unidades',
+            hasFocus: false, // Mantém a cor sempre acesa
             onChanged: (i) {
               setState(() {
-                _grupoEmFoco = 'Unidades'; // <- ADICIONE AQUI
+                _grupoEmFoco = 'Unidades';
                 _tabUnidades = i;
               });
             },
-            color: const Color(0xFF7C4DFF),
+            color: const Color(0xFF7C4DFF), // Roxo padrão da aba
           ),
 
-          // área de filtros - abaixo dos botões (somente para Unidade)
+          // Área de filtros - abaixo dos botões (somente para Unidade)
           if (_tabUnidades == 0) const SizedBox(height: 12),
           if (_tabUnidades == 0)
-            Container(
-              decoration: BoxDecoration(
-                color: getFormGrisColor(context),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: getBorderColor(context)),
-              ),
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  // Campo de busca "Todas as unidades" (agora apenas texto para filtrar cards abaixo)
-                  CharacterCounterField(
-                    controller: _filtroUnidadeController,
-                    labelText: 'Unidades',
-                    maxLength: 50,
-                    decoration:
-                        inputDecorationPadrao(context, hintText: 'Unidades')
-                            .copyWith(
-                      suffixIcon: _filtroUnidadeController.text.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(Icons.close,
-                                  size: 20,
-                                  color: getSecondaryTextColor(context)),
-                              onPressed: () {
-                                setState(() {
-                                  _filtroUnidadeController.clear();
-                                });
-                              },
-                            )
-                          : null,
-                    ),
-                    onChanged: (value) {
-                      setState(() {});
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  // Campo Nome abaixo de "Todas as unidades"
-                  // Campo Nome e Botões na mesma linha
-                  Row(
-                    children: [
-                      Expanded(
-                        child: CharacterCounterField(
-                          controller: _filtroNomeUnidadeController,
-                          labelText: 'Nome',
-                          maxLength: 50,
-                          decoration:
-                              inputDecorationPadrao(context, hintText: 'Nome'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TransparentIconGroup([
-                        IconActionData(
-                          icon: Symbols.ink_eraser,
-                          tooltip: 'Limpar filtros',
-                          color: IconColors.delete(context),
-                          onPressed: () {
-                            setState(() {
-                              _filtroUnidadeSelecionado = null;
-                              _filtroUnidadeController.clear();
-                              _filtroNomeUnidadeController.clear();
-                            });
-                          },
-                        ),
-                        IconActionData(
-                          icon: Symbols.search,
-                          tooltip: 'Carregar unidades',
-                          color: IconColors.search(context),
-                          onPressed: _fetchUnidadesFiltro,
-                          isLoading: _loadingUnidadesFiltro,
-                        ),
-                      ]),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+            _buildFiltrosUnidades(), // 👇 Chamando o método que criamos!
 
           // Filtros de veículos - abaixo dos botões (somente para Veículos)
           if (_tabUnidades == 1) const SizedBox(height: 12),
           if (_tabUnidades == 1)
-            Container(
-              decoration: BoxDecoration(
-                color: getFormGrisColor(context),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: getBorderColor(context)),
-              ),
-              padding: const EdgeInsets.all(16),
-              child: Column(
+            // 👇 Transformando o filtro de veículos em FilterTab também!
+            FilterTab(
+              title: 'Filtros de Veículos',
+              themeColor: const Color(0xFF7C4DFF), // Roxo
+              icon: Icons.tune,
+              initiallyExpanded: false,
+              content: Column(
                 children: [
                   Row(
                     children: [
@@ -6503,8 +6184,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               unidade['morador'] ??
                               '';
 
+                          // 👇 AQUI ESTÁ A MUDANÇA: Invertemos a ordem!
                           final titulo = nomeMoradorRaw.isNotEmpty
-                              ? '$nomeMoradorRaw / $nomeUnidade'
+                              ? '$nomeUnidade / $nomeMoradorRaw'
                               : nomeUnidade;
 
                           final subtitulo = tipoMorador == 'P'
@@ -7174,39 +6856,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _fetchUnidadesEncomenda() async {
-    setState(() => _loadingUnidadesEncomenda = true);
-    final result = await EncomendaFetchService.fetchUnidadesEncomenda();
-    if (mounted) {
-      setState(() {
-        _unidadesEncomendaList = result;
-        _loadingUnidadesEncomenda = false;
-      });
-    }
-  }
-
-  Future<void> _fetchTiposEncomenda() async {
-    setState(() => _loadingTiposEncomenda = true);
-    final result = await EncomendaFetchService.fetchTiposEncomenda();
-    if (mounted) {
-      setState(() {
-        _tiposEncomendaList = result;
-        _loadingTiposEncomenda = false;
-      });
-    }
-  }
-
-  Future<void> _fetchLocaisEncomenda() async {
-    setState(() => _loadingLocaisEntrega = true);
-    final result = await EncomendaFetchService.fetchLocaisEncomenda();
-    if (mounted) {
-      setState(() {
-        _locaisEntregaList = result;
-        _loadingLocaisEntrega = false;
-      });
-    }
-  }
-
   //-----------------------------//
   // Buscar espaá§os sociais da API para filtro de agendamentos
   //-----------------------------//
@@ -7350,6 +6999,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final tokenSessao =
         (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
 
+    // Obter condominioId por precaução para enviar no payload
+    final condominioId = await getCondominioIdAtual();
+
     if (tokenSessao.isEmpty) return;
 
     final url = Uri.parse(
@@ -7361,28 +7013,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
 
     try {
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-      );
+      final response = await http.post(url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $tokenSessao',
+          },
+          // Enviando também no body para garantir compatibilidade com a API
+          body: jsonEncode({
+            "condominio_id": condominioId,
+            "reserva_id": int.tryParse(reservaId) ?? 0
+          }));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final convidadosData = data['data'];
-        final lista =
-            (convidadosData is Map && convidadosData['convidados'] is List)
-                ? convidadosData['convidados']
-                : [];
+        List<dynamic> lista = [];
+
+        // Parsing à prova de balas
+        if (data is List) {
+          lista = data;
+        } else if (data['data'] != null) {
+          final convidadosData = data['data'];
+          if (convidadosData is List) {
+            lista = convidadosData;
+          } else if (convidadosData is Map) {
+            if (convidadosData['convidados'] is List) {
+              lista = convidadosData['convidados'];
+            } else if (convidadosData['lista'] is List) {
+              lista = convidadosData['lista'];
+            }
+          }
+        }
 
         setState(() {
           _quantidadeConvidados[reservaId] = lista.length;
+          _convidadosPorReserva[reservaId] = lista;
+        });
+      } else {
+        // Se a API falhar, registra vazio para tirar do estado de "Carregando"
+        setState(() {
+          _convidadosPorReserva[reservaId] = [];
         });
       }
     } catch (e) {
-      // Silenciosamente ignora erro
+      setState(() {
+        _convidadosPorReserva[reservaId] = [];
+      });
     }
   }
 
@@ -7482,9 +7157,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _buscarCadastroAvulso({bool abrirEdicao = false}) async {
+  Future<void> _buscarCadastroAvulso(
+      {bool abrirEdicao = false, int pessoacadastro_id = 0}) async {
     final prefs = await SharedPreferences.getInstance();
-    final condominioId = prefs.getString('condominio_id') ?? '';
+    final encryptedCondominioId = prefs.getString('condominio_id') ?? '';
+    final condominioId = (encryptedCondominioId.isNotEmpty)
+        ? decryptText(encryptedCondominioId)
+        : '';
     final encrypted = prefs.getString('tokensessao_txt');
     final tokenSessao = (encrypted != null && encrypted.isNotEmpty)
         ? decryptText(encrypted)
@@ -7504,6 +7183,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final payloadList = {
       "condominio_id": int.tryParse(condominioId) ?? 0,
       "documento": documento,
+      "pessoacadastro_id": pessoacadastro_id,
     };
     try {
       final responseList = await http.post(
@@ -7519,6 +7199,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final lista = data['data']?['lista'] as List?;
         if (lista != null && lista.isNotEmpty) {
           cadastro = lista[0];
+          print("cadastro1: $cadastro");
         } else {}
       } else {}
     } catch (e) {}
@@ -7548,6 +7229,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         } else {}
       } else {}
     } catch (e) {}
+
     // 3. Se encontrou cadastro, mesmo sem selecionado valido (pois cadastroavulsolist traz dados do usuário)
     if (cadastro != null) {
       setState(() {
@@ -7568,9 +7250,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (pId > 0) {
           _cadastroAvulso!['pessoadocumento_id'] = pId;
         }
+        final nome = cadastro['nome'] ?? 'Informe o nome completo';
+        _nomeController.text = nome;
 
-        // Preenche apenas o nome
-        _nomeController.text = cadastro['nome'] ?? '';
+        // 👇 NOVA LÓGICA: POSICIONAR NA UNIDADE AUTOMATICAMENTE
+        final aptoId = cadastro!['apto_id'] ?? 0;
+        print("aptoId $aptoId");
+        if (aptoId != null && aptoId > 0) {
+          _selectedUnidade = _unidadesList.firstWhere(
+            (u) =>
+                _convertToValidId(u['apto_id']) == aptoId ||
+                _convertToValidId(u['id']) == aptoId,
+            orElse: () => <String, dynamic>{},
+          );
+
+          if (_selectedUnidade != null && _selectedUnidade!.isEmpty) {
+            _selectedUnidade = null;
+          } else if (_selectedUnidade != null) {
+            // Aproveita para preencher o autorizante com o nome atrelado à unidade caso ele não exista
+            final nomeUnidade = _selectedUnidade!['nome_morador'] ??
+                _selectedUnidade!['morador'] ??
+                _selectedUnidade!['pessoa'] ??
+                _selectedUnidade!['nome'] ??
+                _selectedUnidade!['unidade_mostra'] ??
+                '';
+
+            if (nomeUnidade.toString().isNotEmpty) {
+              _autorizanteController.text = nomeUnidade.toString();
+            }
+          }
+        }
+        // 👆 FIM DA NOVA LÓGICA
       });
 
       // Lógica de fotos executada FORA do setState
@@ -7579,16 +7289,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       int idSelFinal = selecionado?['pessoacadastro_id'] ?? 0;
       int idCadFinal = cadastro['pessoacadastro_id'] ?? 0;
       int pessoaIdFinal = idSelFinal > 0 ? idSelFinal : idCadFinal;
-
-      print(
-          '[DEBUG] Resolvendo ID (pessoacadastro_id) para fotos: Sel=$idSelFinal, Cad=$idCadFinal -> Final=$pessoaIdFinal');
-
       if (pessoaIdFinal > 0) {
-        print(
-            'ðŸ“¸ [DEBUG] Chamando _buscarFotosAvulso para ID: $pessoaIdFinal');
         _buscarFotosAvulso(pessoaIdFinal);
       } else {
-        print('âš ï¸ [DEBUG] Sem ID válido para buscar fotos.');
         setState(() {
           _fotoBase64 = null;
           _fotoDocumentoBase64 = null;
@@ -7771,10 +7474,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // RECUPERAR O ID SALVO - se não tem ID, buscar primeiro
     var pessoaDocumentoId =
         _cadastroAvulso?['pessoadocumento_id'] ?? _ultimoPessoadocumentoId ?? 0;
+    var pessoaCadastroId = _cadastroAvulso?['pessoacadastro_id'] ?? 0;
 
     // Se não tem ID salvo, significa que as APIs anteriores não foram chamadas ainda
     if (pessoaDocumentoId == 0) {
-      await _buscarCadastroAvulso();
+      await _buscarCadastroAvulso(
+          abrirEdicao: false, pessoacadastro_id: pessoaCadastroId);
       // Recarregar o ID após a busca
       pessoaDocumentoId = _cadastroAvulso?['pessoadocumento_id'] ??
           _ultimoPessoadocumentoId ??
@@ -8145,16 +7850,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Widget para filtros de vagas
+// Widget para filtros de vagas
   Widget _buildFiltrosVagas() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: getFormGrisColor(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: getBorderColor(context)),
-      ),
-      child: Column(
+    return FilterTab(
+      title: 'Filtros de Vagas',
+      themeColor: const Color(0xFF7C4DFF), // Roxo da aba Unidades
+      icon: Icons.tune,
+      initiallyExpanded: false,
+      content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -8226,25 +7929,87 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Widget para filtros de unidades
+// Widget para filtros de unidades
   Widget _buildFiltrosUnidades() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: getFormGrisColor(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: getBorderColor(context)),
-      ),
-      child: Column(
+    return FilterTab(
+      title: 'Filtros de Unidades',
+      themeColor: const Color(0xFF7C4DFF), // Cor roxa da aba Unidades
+      icon: Icons.tune,
+      initiallyExpanded: false,
+      content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Filtro de Nome da Unidade - movido para baixo
+          // Campo de busca "Todas as unidades"
+          CharacterCounterField(
+            controller: _filtroUnidadeController,
+            labelText: 'Unidades',
+            maxLength: 50,
+            decoration:
+                inputDecorationPadrao(context, hintText: 'Unidades').copyWith(
+              suffixIcon: _filtroUnidadeController.text.isNotEmpty
+                  ? IconButton(
+                      icon: Icon(Icons.close,
+                          size: 20, color: getSecondaryTextColor(context)),
+                      onPressed: () {
+                        setState(() {
+                          _filtroUnidadeController.clear();
+                        });
+                      },
+                    )
+                  : null,
+            ),
+            onChanged: (value) {
+              setState(() {});
+            },
+          ),
+          const SizedBox(height: 12),
+          // Campo Nome e Botões na mesma linha
+          Row(
+            children: [
+              Expanded(
+                child: CharacterCounterField(
+                  controller: _filtroNomeUnidadeController,
+                  labelText: 'Nome',
+                  maxLength: 50,
+                  decoration: inputDecorationPadrao(context, hintText: 'Nome'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Botões de Ação
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TransparentIconGroup([
+                IconActionData(
+                  icon: Symbols.ink_eraser,
+                  tooltip: 'Limpar filtros',
+                  color: IconColors.delete(context),
+                  onPressed: () {
+                    setState(() {
+                      _filtroUnidadeSelecionado = null;
+                      _filtroUnidadeController.clear();
+                      _filtroNomeUnidadeController.clear();
+                    });
+                  },
+                ),
+                IconActionData(
+                  icon: Symbols.search,
+                  tooltip: 'Carregar unidades',
+                  color: IconColors.search(context),
+                  onPressed: _fetchUnidadesFiltro,
+                  isLoading: _loadingUnidadesFiltro,
+                ),
+              ]),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  //-----------------------------//
+//-----------------------------//
   // Widget para filtros de entrada
   //-----------------------------//
   Widget _buildFiltrosEntrada() {
@@ -8253,18 +8018,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return const SizedBox.shrink();
     }
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: getFormGrisColor(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: getBorderColor(context)),
-      ),
-      child: Column(
+    // 1. Definimos o título e a cor dinamicamente com base na aba atual
+    String titulo = _tipoFiltroEntrada == 0
+        ? 'Filtros de Avulso'
+        : 'Filtros de Agendamentos';
+
+    if (_tipoFiltroEntrada == 0) {
+      titulo = 'Filtros de Avulso';
+    } else if (_tipoFiltroEntrada == 1) {
+      titulo = 'Filtros de Agendamentos';
+    } else {
+      titulo = 'Filtros de Saídas';
+    }
+
+    //final corTema = _tipoFiltroEntrada == 0 ? Colors.grey : Colors.blue;
+    final corTema = const Color(0xFF00C853); // Verde da aba Avulso
+
+    // 2. Usamos o FilterTab no lugar do antigo Container
+    return FilterTab(
+      title: titulo,
+      themeColor: corTema,
+      initiallyExpanded: true,
+      icon: Icons.tune,
+      // 3. A Column que você já tinha vai inteira aqui dentro de "content"
+      content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Segmented control removido - agora está no topo do painel
-
           // Campos baseados no tipo selecionado
           if (_tipoFiltroEntrada == 0) ...[
             // Modo Avulso: Documento e Nome
@@ -8286,11 +8065,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     readOnly: false,
                     onChanged: (value) {
                       setState(() {
-                        // Remove erro quando o usuário digita
                         if (_erroDocumentoEntrada && value.trim().isNotEmpty) {
                           _erroDocumentoEntrada = false;
                         }
-                        // Se documento está preenchido, remove obrigatoriedade do nome
                         if (value.trim().isNotEmpty &&
                             _tipoFiltroEntrada == 0) {
                           _erroNomeEntrada = false;
@@ -8298,17 +8075,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       });
                     },
                     onSubmitted: (value) {
-                      if (value.trim().isNotEmpty) {
-                        setState(() {
-                          _erroDocumentoEntrada = false;
-                          _erroNomeEntrada = false;
-                          _filtroEntradaMinimizado = false;
-                        });
-                        _buscarEntradasFiltradas();
+                      if (_tipoFiltroEntrada == 0) {
+                        _pesquisarAvulsoDiretoFormulario(); // Redireciona direto pro form
                       } else {
-                        setState(() {
-                          _erroDocumentoEntrada = true;
-                        });
+                        if (value.trim().isNotEmpty) {
+                          setState(() {
+                            _erroDocumentoEntrada = false;
+                            _erroNomeEntrada = false;
+                            _filtroEntradaMinimizado = false;
+                          });
+                          _buscarEntradasFiltradas(); // Fluxo de Agendamento mantém cards
+                        } else {
+                          setState(() {
+                            _erroDocumentoEntrada = true;
+                          });
+                        }
                       }
                     },
                   ),
@@ -8332,7 +8113,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     enableInteractiveSelection: true,
                     readOnly: false,
                     onChanged: (value) {
-                      // Remove erro quando o usuário digita
                       if (_erroNomeEntrada && value.trim().isNotEmpty) {
                         setState(() {
                           _erroNomeEntrada = false;
@@ -8345,19 +8125,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       }
                     },
                     onSubmitted: (value) {
-                      final documento =
-                          _filtroDocumentoEntradaController.text.trim();
-                      if (documento.isNotEmpty) {
-                        setState(() {
-                          _erroDocumentoEntrada = false;
-                          _erroNomeEntrada = false;
-                          _filtroEntradaMinimizado = false;
-                        });
-                        _buscarEntradasFiltradas();
+                      if (_tipoFiltroEntrada == 0) {
+                        _pesquisarAvulsoDiretoFormulario(); // Redireciona direto pro form
                       } else {
-                        setState(() {
-                          _erroDocumentoEntrada = true;
-                        });
+                        final documento =
+                            _filtroDocumentoEntradaController.text.trim();
+                        if (documento.isNotEmpty) {
+                          setState(() {
+                            _erroDocumentoEntrada = false;
+                            _erroNomeEntrada = false;
+                            _filtroEntradaMinimizado = false;
+                          });
+                          _buscarEntradasFiltradas();
+                        } else {
+                          setState(() {
+                            _erroDocumentoEntrada = true;
+                          });
+                        }
                       }
                     },
                   ),
@@ -8386,18 +8170,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _fecharPainelLateral();
                     },
                   ),
-                  // Removida condicional: botão Buscar (lupa) deve sempre aparecer antes de Novo Cadastro
                   IconActionData(
                     icon: Symbols.search,
                     tooltip: 'Buscar visitante',
                     color: IconColors.search(context),
                     onPressed: () {
-                      final documento =
-                          _filtroDocumentoEntradaController.text.trim();
-                      final nome = _filtroNomeEntradaController.text.trim();
-
                       if (_tipoFiltroEntrada == 0) {
-                        // Modo Avulso: pelo menos um campo deve estar preenchido
+                        _pesquisarAvulsoDiretoFormulario(); // 👈 Lupa vai direto pro form
+                      } else {
+                        final documento =
+                            _filtroDocumentoEntradaController.text.trim();
+                        final nome = _filtroNomeEntradaController.text.trim();
+
                         if (documento.isEmpty && nome.isEmpty) {
                           setState(() {
                             _erroDocumentoEntrada = true;
@@ -8405,35 +8189,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           });
                           return;
                         }
+                        setState(() {
+                          _erroDocumentoEntrada = false;
+                          _erroNomeEntrada = false;
+                          _filtroEntradaMinimizado = false;
+                        });
+                        _buscarEntradasFiltradas();
                       }
-
-                      // Remove erros se campos estão preenchidos e expande filtro
-                      setState(() {
-                        _erroDocumentoEntrada = false;
-                        _erroNomeEntrada = false;
-                        _filtroEntradaMinimizado =
-                            false; // Expandir ao buscar visitante
-                      });
-                      _buscarEntradasFiltradas();
                     },
                     isLoading: _loadingBuscaEntrada,
                   ),
+                  /*
                   IconActionData(
                     icon: Symbols.person_add,
                     tooltip: 'Novo Cadastro',
                     color: IconColors.play(context),
                     onPressed: () {
-                      // Limpar campos e abrir formulário de novo cadastro
                       _filtroDocumentoEntradaController.clear();
                       _filtroNomeEntradaController.clear();
                       setState(() {
                         _mostrarFormEntrada = true;
                         _isNovoUsuario = true;
                         _isAgendamento = false;
+                        _temCadastroAvulso =
+                            false; // 👈 Garante que o form entenda ser novo
                         _erroDocumentoEntrada = false;
                         _erroNomeEntrada = false;
                         _convidadosResultados.clear();
-                        // LIMPEZA DO BOX DE FOTO AQUI 👇
                         _fotoEntrada = null;
                         _fotoDocumento = null;
                         _fotoRostoEntrada = null;
@@ -8444,12 +8226,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _limparFormulario();
                     },
                   ),
+                  */
                 ]),
               ],
             ),
           ] else ...[
             // Modo Agendamentos: Documento, Nome, Unidade, Período
-            // Primeira linha: Documento (linha inteira para evitar truncamento)
             Row(
               children: [
                 Expanded(
@@ -8475,30 +8257,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onSubmitted: (_) {
                       final temData = _filtroDataInicioEntrada != null ||
                           _filtroDataFimEntrada != null;
-
                       if (!temData) {
                         setState(() {
                           _erroDataEntrada = true;
                         });
                         return;
                       }
-
                       setState(() {
                         _erroDataEntrada = false;
                         _erroDocumentoEntrada = false;
                         _erroNomeEntrada = false;
                       });
-
                       final espacosSelecionados =
                           _espacosSocialList.where((espaco) {
                         final id = espaco['espacopublico_id'] as int? ?? 0;
                         return _espacosSociaisSelecionadosFiltro[id] == true;
                       }).toList();
-
                       final espacosParaBusca = espacosSelecionados.isNotEmpty
                           ? espacosSelecionados
                           : _espacosSocialList;
-
                       _buscarAgendamentosEntradaFiltrados(
                           espacosSelecionados: espacosParaBusca);
                     },
@@ -8507,7 +8284,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            // Segunda linha: Nome e Sobrenome (linha inteira)
             Row(
               children: [
                 Expanded(
@@ -8522,30 +8298,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onSubmitted: (_) {
                       final temData = _filtroDataInicioEntrada != null ||
                           _filtroDataFimEntrada != null;
-
                       if (!temData) {
                         setState(() {
                           _erroDataEntrada = true;
                         });
                         return;
                       }
-
                       setState(() {
                         _erroDataEntrada = false;
                         _erroDocumentoEntrada = false;
                         _erroNomeEntrada = false;
                       });
-
                       final espacosSelecionados =
                           _espacosSocialList.where((espaco) {
                         final id = espaco['espacopublico_id'] as int? ?? 0;
                         return _espacosSociaisSelecionadosFiltro[id] == true;
                       }).toList();
-
                       final espacosParaBusca = espacosSelecionados.isNotEmpty
                           ? espacosSelecionados
                           : _espacosSocialList;
-
                       _buscarAgendamentosEntradaFiltrados(
                           espacosSelecionados: espacosParaBusca);
                     },
@@ -8554,7 +8325,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            // Terceira linha: Unidade
             Row(
               children: [
                 Expanded(
@@ -8578,7 +8348,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            // Terceira linha: Período (ocupando largura total)
             _buildPeriodFilter(
               context: context,
               startDate: _filtroDataInicioEntrada,
@@ -8602,8 +8371,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 });
               },
             ),
-
-            // 2. Painel de Filtros de Agendamento (Sempre visível)
             const SizedBox(height: 16),
             Container(
               width: double.infinity,
@@ -8620,10 +8387,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: _buildCardsTiposAgendamentoContent(
                   transparent: true, isFullWidth: false),
             ),
-
             const SizedBox(height: 12),
-
-            // Quarta linha: Botões de Açao
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -8664,7 +8428,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           _filtroEntradaMinimizado = false;
                         });
                       } else {
-                        // Se não minimizado, realiza a busca com os filtros atuais
                         final espacosSelecionados =
                             _espacosSocialList.where((espaco) {
                           final id = espaco['espacopublico_id'] as int? ?? 0;
@@ -8751,20 +8514,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     final List<Widget> items = [];
-
     final isDark = isDarkMode(context);
 
     for (int i = 0; i < _espacosSocialList.length; i++) {
       final espaco = _espacosSocialList[i];
-
       final id = espaco['espacopublico_id'] as int? ?? 0;
-
       var descricao = espaco['espacopublico_ds'] as String? ?? '';
-
       descricao = descricao.replaceAll('Temporária', 'Temporaria');
-
       final icone = espaco['icone'] as String?;
-
       final isSelected = _espacosSociaisSelecionadosFiltro[id] ?? false;
 
       Widget itemContent = InkWell(
@@ -8784,9 +8541,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Icon(
                   _getIconData(icone),
-
-                  size: 22, // Reduzi levemente para caber melhor na altura 48
-
+                  size: 22,
                   color: isSelected
                       ? const Color(0xFF2E74FF)
                       : (isDark ? Colors.white70 : Colors.grey.shade600),
@@ -8891,6 +8646,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     }
                     return buildStandardAutocomplete<Map<String, dynamic>>(
                       context: context,
+                      key: const ValueKey('form_entrada_unidade'),
                       labelText: 'Unidade',
                       items: _unidadesList,
                       itemAsString: (option) => unidadeLabelComMorador(option),
@@ -8963,7 +8719,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       if (_mostrarRecentes) {
                         await _buscarPassagensRecentes();
                       } else {
-                        await _buscarHistoricoFiltrado();
+                        await _buscarHistoricoFiltrado(true);
                       }
 
                       setState(() {
@@ -9057,7 +8813,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // Funçao para filtrar unidades por seleçao
+// Função para filtrar unidades por seleçao
   List<Map<String, dynamic>> _getUnidadesFiltradas() {
     final filtroUnidade = _filtroUnidadeController.text.trim();
     final filtroNome = _filtroNomeUnidadeController.text.trim();
@@ -9068,7 +8824,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     // Filtrar por torre/unidade baseado na seleçao
-    return _unidadesList.where((unidade) {
+    var listaFiltrada = _unidadesList.where((unidade) {
       bool matchesUnidade = true;
       if (filtroUnidade.isNotEmpty) {
         final unidadeTexto =
@@ -9088,13 +8844,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
             (unidade['nome_morador'] ?? unidade['morador'] ?? '')
                 .toString()
                 .toLowerCase();
-        final filtroNome =
+        final filtroNomeTexto =
             _filtroNomeUnidadeController.text.trim().toLowerCase();
-        matchesNome = nomeMorador.contains(filtroNome);
+        matchesNome = nomeMorador.contains(filtroNomeTexto);
       }
 
       return matchesUnidade && matchesNome;
     }).toList();
+
+    // Ordenar a lista filtrada alfabeticamente pela propriedade "unidade_mostra" ou "nome"
+    listaFiltrada.sort((a, b) {
+      final unidadeA =
+          (a['unidade_mostra'] ?? a['nome'] ?? '').toString().toLowerCase();
+      final unidadeB =
+          (b['unidade_mostra'] ?? b['nome'] ?? '').toString().toLowerCase();
+      return unidadeA.compareTo(unidadeB);
+    });
+
+    return listaFiltrada;
   }
 
   // Buscar passagens recentes usando API passagem
@@ -9136,6 +8903,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           setState(() {
             _historicoFiltrado = passagensRecentes;
+
+            // Mantemos a atualização da lista de passagens
+            _passagens = passagensRecentes;
+
+            // 👇 APAGUE OU COMENTE ESTA LINHA ABAIXO TAMBÉM!
+            // _todasPassagens = passagensRecentes;
+
             _loadingHistorico = false;
           });
         } else {
@@ -9155,10 +8929,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // Buscar histórico filtrado usando API passagemhistorico
-  Future<void> _buscarHistoricoFiltrado() async {
+// Buscar histórico filtrado usando API passagemhistorico
+  Future<void> _buscarHistoricoFiltrado(bool naosairam) async {
     setState(() {
       _loadingHistorico = true;
+      // Limpa os resultados anteriores para evitar concorrência visual
+      _historicoFiltrado = [];
     });
     print('_buscarHistoricoFiltrado');
     try {
@@ -9189,7 +8965,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             '${dataIni.year}-${dataIni.month.toString().padLeft(2, '0')}-${dataIni.day.toString().padLeft(2, '0')} 00:00:00', // Data atual ou filtro (00:00:00)
         "nome": _filtroNomeHistoricoController.text.trim(),
         "pessoaveiculo": _filtroDocumentoHistoricoController.text.trim(),
-        "placa": _filtroPlacaHistoricoController.text.trim()
+        "placa": _filtroPlacaHistoricoController.text.trim(),
+        "naosairam": naosairam
       };
 
       final response = await http.post(
@@ -9206,8 +8983,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final data = jsonDecode(response.body);
           final historico = List<Map<String, dynamic>>.from(data['data'] ?? []);
 
+          // Opcional: ordenar sempre pelo registro mais recente (maior data)
+          historico.sort((a, b) {
+            final dataA = _parseDateTime(
+                    a['data']?.toString() ?? a['dt_ini']?.toString() ?? '') ??
+                DateTime(2000);
+            final dataB = _parseDateTime(
+                    b['data']?.toString() ?? b['dt_ini']?.toString() ?? '') ??
+                DateTime(2000);
+            return dataB.compareTo(dataA);
+          });
+
           setState(() {
             _historicoFiltrado = historico;
+
+            // Mantemos a atualização da lista de passagens
+            _passagens = historico;
+
+            // 👇 APAGUE OU COMENTE ESTA LINHA ABAIXO!
+            // _todasPassagens = historico;
+
             _loadingHistorico = false;
           });
         } else {
@@ -9299,7 +9094,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       _loadingSaidasList = true;
     });
-
+    print('_buscarSaidasFiltradas: true');
     try {
       final prefs = await SharedPreferences.getInstance();
       final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
@@ -9346,30 +9141,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final saidasFiltradas =
             List<Map<String, dynamic>>.from(data['data'] ?? []);
 
-        // Mostrar todas as passagens, mesmo as que já têm saída registrada
-        // Enriquecer dados das passagens com informaá§ões das unidades
-        final passagensEnriquecidas =
-            _enriquecerPassagensComDadosUnidade(saidasFiltradas);
-
-        // Se há filtros aplicados, tentar enriquecer dados AV com informaá§ões do cadastro avulso
-        if (_filtroDocumentoSaidasController.text.trim().isNotEmpty ||
-            _filtroNomeSaidasController.text.trim().isNotEmpty) {
-          await _enriquecerDadosAvulsos(passagensEnriquecidas);
-        }
-
         setState(() {
-          _todasPassagens = passagensEnriquecidas;
+          _saidasPendentes = saidasFiltradas;
           _loadingSaidasList = false;
         });
       } else {
         setState(() {
-          _todasPassagens = [];
+          _saidasPendentes = [];
           _loadingSaidasList = false;
         });
       }
     } catch (e) {
       setState(() {
-        _todasPassagens = [];
+        _saidasPendentes = [];
         _loadingSaidasList = false;
       });
     }
@@ -9393,6 +9177,253 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Filtrar apenas as saídas (registros com data de saída)
     setState(() {
       // Saídas sá£o filtradas dinamicamente quando necessário
+    });
+  }
+
+// -------------------------------------------------------------
+  // BUSCA DIRETA PARA O FORMULÁRIO (ABA AVULSO)
+  // -------------------------------------------------------------
+  Future<void> _pesquisarAvulsoDiretoFormulario() async {
+    final documento = _filtroDocumentoEntradaController.text.trim();
+    final nome = _filtroNomeEntradaController.text.trim();
+    int pessoacadastroId = 0;
+
+    if (documento.length < 3 && nome.isEmpty) {
+      FeedbackUtils.showWarning(
+          context: context,
+          title: 'Atenção',
+          message: 'Preencha o documento ou o nome para buscar.');
+      setState(() {
+        if (documento.isEmpty) _erroDocumentoEntrada = true;
+        if (nome.isEmpty) _erroNomeEntrada = true;
+      });
+      return;
+    }
+
+    setState(() {
+      _loadingBuscaEntrada = true;
+      _erroDocumentoEntrada = false;
+      _erroNomeEntrada = false;
+    });
+
+    // Sincroniza o documento com o controller principal do form
+    if (documento.isNotEmpty) {
+      _documentoController.text = documento;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final encryptedCondominioId = prefs.getString('condominio_id') ?? '';
+      final condominioId = (encryptedCondominioId.isNotEmpty)
+          ? decryptText(encryptedCondominioId)
+          : '';
+
+      final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
+
+      final tokenSessao =
+          (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
+
+      if (condominioId.isNotEmpty && tokenSessao.isNotEmpty) {
+        // ==============================================================
+        // 1. PRIMEIRA VERIFICAÇÃO: Buscar se há agendamento na API (buscaentrada)
+        // ==============================================================
+        final urlBuscaEntrada =
+            Uri.parse(ApiConfig.getEndpoint('dashboard', 'buscaentrada'));
+        final paramsBuscaEntrada = {
+          'condominio_id': int.tryParse(condominioId) ?? 0,
+          'apto_id': 0,
+          'nome': nome,
+          'documento': documento,
+          'dt_ini': null,
+          'dt_fim': null,
+          'tipoagendamento': 'S,H,M,A,P,R,K,',
+        };
+
+        final responseBusca = await http.post(
+          urlBuscaEntrada,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $tokenSessao',
+          },
+          body: json.encode(paramsBuscaEntrada),
+        );
+
+        if (responseBusca.statusCode == 200) {
+          final responseData = json.decode(responseBusca.body);
+          List<Map<String, dynamic>> resultados =
+              List<Map<String, dynamic>>.from(responseData['data'] ?? []);
+
+          if (resultados.isNotEmpty) {
+            final tipo = resultados[0]['tipo']?.toString() ?? '';
+            if (tipo == 'AG') {
+              // AGENDAMENTO LOCALIZADO! Muda para a aba de Agendamentos
+              setState(() {
+                _tabAvulsoAgendamentosSaidas =
+                    1; // Alterna o SegmentedControl para "Agendamentos"
+                _tipoFiltroEntrada = 1; // Atualiza a lógica de filtros
+                _mostrarFormEntrada =
+                    false; // Garante que NENHUM form seja mostrado
+                _filtroEntradaMinimizado = false;
+              });
+
+              // 👇 A MÁGICA AQUI: Simulamos o clique no botão "Pesquisar" da aba de Agendamentos
+              final espacosSelecionados = _espacosSocialList.where((espaco) {
+                final id = espaco['espacopublico_id'] as int? ?? 0;
+                return _espacosSociaisSelecionadosFiltro[id] == true;
+              }).toList();
+
+              final espacosParaBusca = espacosSelecionados.isNotEmpty
+                  ? espacosSelecionados
+                  : _espacosSocialList;
+
+              _tipoFiltroEntrada = 2; // Atualiza a lógica de filtros
+              // Aciona a busca nativa da aba de agendamentos para listar os resultados perfeitamente
+              await _buscarAgendamentosEntradaFiltrados(
+                  espacosSelecionados: espacosParaBusca);
+
+              setState(() {
+                _loadingBuscaEntrada = false;
+              });
+
+              FeedbackUtils.showSuccess(
+                context: context,
+                title: 'Agendamento Localizado',
+                message:
+                    'Foi encontrado um agendamento prévio para este visitante.',
+              );
+              return; // 👈 Interrompe a execução aqui, ignorando a busca avulsa!
+            } else {
+              pessoacadastroId =
+                  int.tryParse(resultados[0]['id_pai']?.toString() ?? '0') ?? 0;
+              setState(() {});
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('Erro ao consultar buscaentrada no fluxo avulso: $e');
+      // Em caso de erro, segue silenciosamente para a busca avulsa.
+    }
+
+    // ==============================================================
+    // 2. SE NÃO TEM AGENDAMENTO: Executa a busca Avulsa (cadastroAvulso)
+    // (A função _buscarCadastroAvulso já baixa as fotos automaticamente se achar!)
+    // ==============================================================
+    await _buscarCadastroAvulso(
+        abrirEdicao: false, pessoacadastro_id: pessoacadastroId);
+
+    setState(() {
+      _loadingBuscaEntrada = false;
+      _mostrarFormEntrada =
+          true; // Força a exibição do formulário inline na tela
+      _filtroEntradaMinimizado = false; // Mantém o filtro visível acima
+      _convidadosResultados.clear(); // Garante que NENHUM card apareça na tela
+
+      if (_temCadastroAvulso && _cadastroAvulso != null) {
+        // ==============================================================
+        // 3. CADASTRO LOCALIZADO! PREENCHE O FORMULÁRIO (INCLUSIVE FOTO)
+        // ==============================================================
+        _isNovoUsuario = false;
+        _isAgendamento = false;
+
+        _empresaController.text = _cadastroAvulso!['empresa']?.toString() ?? '';
+        _autorizanteController.text =
+            _cadastroAvulso!['autorizante']?.toString() ?? '';
+        _placaController.text = _cadastroAvulso!['placa']?.toString() ?? '';
+        _modeloController.text = _cadastroAvulso!['modelo']?.toString() ?? '';
+        _obsController.text = _cadastroAvulso!['obs']?.toString() ?? '';
+
+        // Mapeia o tipo (0 = Prestador, 1 = Visitante)
+        final tipo = _cadastroAvulso!['tipovisita']?.toString().toUpperCase() ??
+            _cadastroAvulso!['tipo_visita']?.toString().toUpperCase() ??
+            'V';
+        _tipoPessoa = (tipo == 'P') ? 0 : 1;
+
+        // Mapeamento Inteligente dos Autocompletes (Dropdowns)
+        try {
+          // Unidade
+          final aptoId = _convertToValidId(_cadastroAvulso!['apto_id']);
+          if (aptoId != null && aptoId > 0) {
+            _selectedUnidade = _unidadesList.firstWhere(
+              (u) =>
+                  _convertToValidId(u['apto_id']) == aptoId ||
+                  _convertToValidId(u['id']) == aptoId,
+              orElse: () => <String, dynamic>{},
+            );
+            if (_selectedUnidade != null && _selectedUnidade!.isEmpty)
+              _selectedUnidade = null;
+          }
+
+          // Marca
+          final marcaId = _convertToValidId(_cadastroAvulso!['marca_id']);
+          if (marcaId != null && marcaId > 0) {
+            _selectedMarca = _marcasList.firstWhere(
+              (m) => _convertToValidId(m['id']) == marcaId,
+              orElse: () => <String, dynamic>{},
+            );
+            if (_selectedMarca != null && _selectedMarca!.isEmpty)
+              _selectedMarca = null;
+          }
+
+          // Cor
+          final corId = _convertToValidId(_cadastroAvulso!['cor_id']);
+          if (corId != null && corId > 0) {
+            _selectedCor = _coresList.firstWhere(
+              (c) => _convertToValidId(c['id']) == corId,
+              orElse: () => <String, dynamic>{},
+            );
+            if (_selectedCor != null && _selectedCor!.isEmpty)
+              _selectedCor = null;
+          }
+
+          // Vaga
+          final vagaId = _convertToValidId(_cadastroAvulso!['vaga_id']);
+          if (vagaId != null && vagaId > 0) {
+            _selectedVagaAvulso = _vagasAvulsoList.firstWhere(
+              (v) =>
+                  _convertToValidId(v['vaga_id']) == vagaId ||
+                  _convertToValidId(v['id']) == vagaId,
+              orElse: () => <String, dynamic>{},
+            );
+            if (_selectedVagaAvulso != null && _selectedVagaAvulso!.isEmpty)
+              _selectedVagaAvulso = null;
+          }
+
+          // Crachá
+          final crachaId = _convertToValidId(_cadastroAvulso!['outraident_id']);
+          if (crachaId != null && crachaId > 0) {
+            _selectedCracha = _crachasList.firstWhere(
+              (c) =>
+                  _convertToValidId(c['aviso_id']) == crachaId ||
+                  _convertToValidId(c['id']) == crachaId,
+              orElse: () => <String, dynamic>{},
+            );
+            if (_selectedCracha != null && _selectedCracha!.isEmpty)
+              _selectedCracha = null;
+          }
+        } catch (e) {
+          print('Erro ao mapear dropdowns: $e');
+        }
+      } else {
+        // ==============================================================
+        // 4. NÃO LOCALIZADO! ABRE FORMULÁRIO EM BRANCO PARA NOVO REGISTRO
+        // ==============================================================
+        _isNovoUsuario = true;
+        _isAgendamento = false;
+        if (nome.isNotEmpty) _nomeController.text = nome;
+
+        _empresaController.clear();
+        _autorizanteController.clear();
+        _placaController.clear();
+        _modeloController.clear();
+        _obsController.clear();
+
+        _selectedUnidade = null;
+        _selectedMarca = null;
+        _selectedCor = null;
+        _selectedVagaAvulso = null;
+        _selectedCracha = null;
+      }
     });
   }
 
@@ -9446,8 +9477,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       final Map<String, dynamic> params = {
         'condominio_id': int.tryParse(condominioId) ?? 0,
-        'apto_id': _unidadeFiltroAplicada ??
-            0, // Usar unidade_id selecionada no filtro
+        'apto_id': _unidadeFiltroAplicada ?? 0,
         'nome': _filtroNomeEntradaController.text.trim(),
         'documento': documentoFiltro,
         'dt_ini': null,
@@ -9539,6 +9569,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _resultadosBuscaEntrada = [];
           _loadingBuscaEntrada = false;
           _mostrarFormEntrada = true;
+          _filtroEntradaMinimizado = false;
           // No modo Avulso, não minimizar o filtro
           if (_tipoFiltroEntrada == 0) {
             _filtroEntradaMinimizado =
@@ -9562,9 +9593,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  //-----------------------------//
-  // Buscar espaá§os sociais da API para modal de seleçao
-  //-----------------------------//
   Future<List<Map<String, dynamic>>> _buscarEspacosSociaisParaModal() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -9766,22 +9794,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return;
       }
 
-      // Preparar pará¢metros da requisiçao com período
-      // Usar período selecionado ou data atual como padrão
-      final DateTime dataInicio = _filtroDataInicioEntrada ?? DateTime.now();
-      final DateTime dataFim = _filtroDataFimEntrada ?? DateTime.now();
       final documentoFiltro = _filtroDocumentoEntradaController.text.trim();
+
       final Map<String, dynamic> params = {
         'condominio_id': int.tryParse(condominioId) ?? 0,
         'apto_id': _unidadeFiltroAplicada ??
             0, // Usar unidade_id selecionada no filtro
         'nome': _filtroNomeEntradaController.text.trim(),
         'documento': documentoFiltro,
-        'dt_ini': '${dataInicio.toIso8601String()}Z',
-        'dt_fim': '${dataFim.toIso8601String()}Z',
+        // Se a data não for nula, formata para ISO8601 com 'Z' no final, senão passa null
+        'dt_ini': _filtroDataInicioEntrada != null
+            ? '${_filtroDataInicioEntrada!.toIso8601String()}Z'
+            : null,
+        'dt_fim': _filtroDataFimEntrada != null
+            ? '${_filtroDataFimEntrada!.toIso8601String()}Z'
+            : null,
         'tipo': 'AG',
       };
-
       // Adicionar espaá§os sociais selecionados no modal
       // Formatar como "M, A, H," usando os valores de flg_reserva
       if (espacosSelecionados != null && espacosSelecionados.isNotEmpty) {
@@ -9893,8 +9922,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         });
       }
     } catch (e) {
-      print('Erro ao buscar agendamentos: $e');
-      print('Stack trace: ${StackTrace.current}');
       setState(() {
         _resultadosBuscaEntrada = [];
         _mostrarFormEntrada = true;
@@ -9914,14 +9941,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _processarResultadosBuscaEntrada(
       List<Map<String, dynamic>> resultados,
       {bool apenasAgendamentos = false}) async {
-    // Mapear resultados da buscaentrada diretamente para o formato esperado pelos cards
+    // Mapear resultados da buscaentrada diretamente para o formato esperado
     final List<Map<String, dynamic>> listaFormatada = resultados.map((res) {
-      final tipoBusca = res['tipo']?.toString() ?? 'AG'; // AG ou AV
+      final tipoBusca = res['tipo']?.toString() ?? 'AG';
       final idFilho = int.tryParse(res['id_filho']?.toString() ?? '0') ?? 0;
 
       final map = Map<String, dynamic>.from(res);
-      print('_processarResultadosBuscaEntrada entreou');
-      // Determinar o tipo do card
       if (tipoBusca == 'AV') {
         map['tipo'] = 'AV';
       } else if (idFilho == 0) {
@@ -9930,35 +9955,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
         map['tipo'] = 'AG';
       }
 
-      // Compatibilidade de campos (mapeando campos do buscaentrada para os nomes usados no card)
       map['origem'] = res['origem'] ?? '';
-
-      print(map['origem']);
       map['nome'] = res['nome'] ?? '';
-
       map['documento_txt'] = res['documento'] ?? '';
       map['reserva_tipo_txt'] = res['destino'] ?? 'Agendamento';
       map['reserva_dt_ini'] = res['dt_ini'] ?? '';
       map['reserva_dt_fim'] = res['dt_fim'] ?? '';
-      map['unidade_mostra'] =
-          res['apto'] ?? res['unidade'] ?? ''; // buscaentrada retorna 'apto'
-      map['unidade'] =
-          res['apto'] ?? res['unidade'] ?? ''; // Garantir compatibilidade
-      map['unidade_id'] =
-          res['apto_id'] ?? res['unidade_id']; // buscaentrada retorna 'apto_id'
+      map['unidade_mostra'] = res['apto'] ?? res['unidade'] ?? '';
+      map['unidade'] = res['apto'] ?? res['unidade'] ?? '';
+      map['unidade_id'] = res['apto_id'] ?? res['unidade_id'];
       map['reservaconvidado_id'] = res['id_filho'];
       map['reserva_id'] = res['id_pai'];
       map['link_foto'] = res['link_foto'];
-      // Preservar explicitamente o link da foto de buscaentrada
       map['foto'] = (res['link_foto'] != null &&
               res['link_foto'].toString().isNotEmpty &&
               res['link_foto'].toString() != 'null')
           ? res['link_foto'].toString()
-          : (res['foto_id']?.toString() ??
-              res['foto']
-                  ?.toString()); // buscaentrada pode trazer link_foto, foto_id ou foto
-
-      // Garantir mapeamento de entrada/saída para o dashboard identificar se pessoa já está "dentro"
+          : (res['foto_id']?.toString() ?? res['foto']?.toString());
       map['entrada'] = res['dt_entrada'] ??
           res['entrada'] ??
           res['data_entrada'] ??
@@ -9969,8 +9982,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           res['data_saida'] ??
           res['dt_fim'] ??
           '';
-
-      // Marcar origem para isolamento de abas: 0 = Avulso, 1 = Agendamento
       map['origem_tab'] = apenasAgendamentos ? 1 : 0;
 
       return map;
@@ -9978,19 +9989,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     setState(() {
       _convidadosResultados = listaFormatada;
-      _convidadosReserva =
-          listaFormatada; // Sincronizar para o painel lateral também usar
+      _convidadosReserva = listaFormatada;
 
-      if (apenasAgendamentos) {
+      if (apenasAgendamentos)
         _loadingBuscaAgendamentos = false;
-      } else {
+      else
         _loadingBuscaEntrada = false;
-      }
 
-      // Se houver resultados, não mostrar formulário vazio
-      if (listaFormatada.isNotEmpty) {
-        _mostrarFormEntrada = false;
-      }
+      if (listaFormatada.isNotEmpty) _mostrarFormEntrada = false;
     });
   }
 
@@ -11923,11 +11929,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _selecionarConvidadoParaEntrada(
       Map<String, dynamic> convidado) async {
-    // Debug detalhado dos dados do convidado
-    print(
-        'ðŸŽ¯ Convidado selecionado para entrada: ${convidado['nome'] ?? convidado['convidado_txt']}');
-    print('ðŸŽ¯ Dados básicos do buscaentrada: $convidado');
-
     // Mover os dados para um mapa mutável que pode ser enriquecido
     Map<String, dynamic> dadosCompletos = Map<String, dynamic>.from(convidado);
 
@@ -12012,7 +12013,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final tipoRaw = dadosCompletos['tipo']?.toString();
     final isTipoAG = _tipoFiltroEntrada == 1 || tipoRaw == 'AG';
     final tipoParaFoto = isTipoAG ? 'AG' : 'AV';
-
+    int pessoacadastroId =
+        int.tryParse(dadosCompletos['pessoacadastro_id']?.toString() ?? '0') ??
+            0;
     int fotoId = 0;
     if (isTipoAG) {
       // Para AG, o ID é reservaconvidado_id
@@ -12030,14 +12033,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     if (fotoId > 0) {
-      print(
-          'ðŸ“¸ [DEBUG] Chamando _buscarFotosAvulso para ID: $fotoId, Tipo: $tipoParaFoto');
       _buscarFotosAvulso(fotoId, tipoUSU: tipoParaFoto);
     } else if (!isTipoAG && isAvulso && _documentoController.text.isNotEmpty) {
-      // Fallback para Avulso sem ID
-      print(
-          'ðŸ“¸ [DEBUG] ID não encontrado no objeto, buscando cadastro completo via Documento (Avulso)');
-      _buscarCadastroAvulso();
+      _buscarCadastroAvulso(
+          abrirEdicao: false, pessoacadastro_id: pessoacadastroId);
     }
     // Verificar se é um agendamento (só se não for AV)
     final ehAgendamento = !isAvulso;
@@ -12436,10 +12435,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'Convidado $reservaConvidadoId removido da lista via API convidadolist');
   }
 
-  Future<void> _fetchPassagens() async {
+  Future<void> _fetchPassagens(bool sairam) async {
     // Funçao mantida para compatibilidade, mas não é mais usada da mesma forma
     // A lógica de saídas foi removida do topo
     {
+      print('_fetchPassagens: $sairam');
       setState(() {
         _loadingSaidasList = true;
       });
@@ -12475,6 +12475,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           "nome": "",
           "pessoaveiculo": "",
           "placa": "",
+          "naosairam": sairam
         };
 
         final response = await http.post(
@@ -12769,24 +12770,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // Funçao auxiliar para formatar o tipo de visita/morador
+// Formatador do subtítulo do Card de Saída
   String _getTipoFormatado(Map<String, dynamic> passagem) {
-    // Primeiro tenta usar o tipo_morador enriquecido da unidade
-    final tipoMorador = passagem['tipo_morador'];
-    if (tipoMorador == 'P') {
-      return 'Proprietário';
-    } else if (tipoMorador == 'L') {
-      return 'Locatário';
+    final tipo = passagem['tipo']?.toString().toUpperCase() ?? '';
+    switch (tipo) {
+      case 'AV':
+        return 'Avulso';
+      case 'AG':
+        return 'Agendamento';
+      case 'PR':
+        return 'Prestador';
+      case 'VI':
+        return 'Visitante';
+      default:
+        return tipo;
     }
-
-    // Se não tem tipo_morador, usa o tipo original da passagem
-    final tipoOriginal = passagem['tipo']?.toString();
-    if (tipoOriginal != null && tipoOriginal.isNotEmpty) {
-      return tipoOriginal;
-    }
-
-    // Fallback
-    return 'Visitante';
   }
 
   // Funçao auxiliar para limpar tags HTML da mensagem
@@ -12902,7 +12900,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // AV (Avulso): Registrar entrada/movimento (já inclui atualizaçao de cadastro se necessário)
         await _registrarEntradaAvulso();
       }
-// Após a API retornar sucesso no salvamento do formulário:
+
+      // Após a API retornar sucesso no salvamento do formulário:
       setState(() {
         _feedbackMessageEntrada = 'Entrada realizada com sucesso!';
         _mostrarFormEntrada = false; // Fecha o formulário
@@ -13197,11 +13196,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Se não tem id, criar cadastro antes
     if (pessoadocumentoId == 0) {
       // Tenta buscar novamente o id do último selecionado
-      await _buscarCadastroAvulso();
+
       pessoadocumentoId = _cadastroAvulso?['pessoadocumento_id'] ??
           _ultimoPessoadocumentoId ??
           0;
       pessoaCadastroId = _cadastroAvulso?['pessoacadastro_id'] ?? 0;
+      await _buscarCadastroAvulso(
+          abrirEdicao: false, pessoacadastro_id: pessoaCadastroId);
 
       if (pessoadocumentoId == 0) {
         // Só chama editacadastro se realmente não houver id
@@ -13312,29 +13313,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       payload["empresa"] = empresa;
     }
 
-    // Adicionar fotos base64 ao payload
-    String fotoRosto = '';
-    if (_fotoRostoEntrada != null && _fotoRostoEntrada!.isNotEmpty) {
-      fotoRosto = _fotoRostoEntrada!;
-    } else if (_fotoEntrada != null) {
-      fotoRosto = base64Encode(_fotoEntrada!);
-    } else if (_fotoBase64 != null && _fotoBase64!.isNotEmpty) {
-      fotoRosto = _fotoBase64!;
-    }
-    String fotoDoc = '';
-    if (_fotoDocumentoEntrada != null && _fotoDocumentoEntrada!.isNotEmpty) {
-      fotoDoc = _fotoDocumentoEntrada!;
-    } else if (_fotoDocumento != null) {
-      fotoDoc = base64Encode(_fotoDocumento!);
-    } else if (_fotoDocumentoBase64 != null &&
-        _fotoDocumentoBase64!.isNotEmpty) {
-      fotoDoc = _fotoDocumentoBase64!;
-    }
-    // Remover prefixo data:image se existir
-    if (fotoRosto.contains(',')) fotoRosto = fotoRosto.split(',').last;
-    if (fotoDoc.contains(',')) fotoDoc = fotoDoc.split(',').last;
-    payload["fotobase64_1"] = fotoRosto;
-    payload["fotobase64_2"] = fotoDoc;
+    //fotos sao tratadas abaixo
+    payload["fotobase64_1"] = '';
+    payload["fotobase64_2"] = '';
 
     String? rostoParaEnviar;
     String? docParaEnviar;
@@ -13352,88 +13333,69 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (response.statusCode == 200) {
         // Registrar fotos separadamente
         // Agora suporta reenvio de fotos (mesmo se for URL) e novas fotos (Base64)
-        if (_fotoRostoEntrada != null ||
-            _fotoDocumentoBase64 != null ||
-            _fotoBase64 != null ||
-            _fotoDocumentoEntrada != null) {
-          final urlFoto = Uri.parse('${ApiConfig.gateUrl}/FotoRegistrar');
+        // 1. GRAVAR FOTO DO ROSTO (ordem_num: 1)
+        final urlFoto = Uri.parse('${ApiConfig.gateUrl}/FotoRegistrar');
 
-          // Funçao auxiliar local para enviar foto
-          Future<void> enviarFoto(String? fotoSource, int ordem) async {
-            if (fotoSource == null || fotoSource.isEmpty) return;
+        if (_fotoRostoEntrada != null && _fotoRostoEntrada!.isNotEmpty) {
+          String fotoRostoClean = _fotoRostoEntrada!.contains(',')
+              ? _fotoRostoEntrada!.split(',').last
+              : _fotoRostoEntrada!;
 
-            String fotoParaEnviar = '';
-
-            // Verifica se é URL
-            if (fotoSource.startsWith('http')) {
-              print(
-                  'ðŸ“¸ Baixando foto URL para reenvio (Ordem $ordem): $fotoSource');
-              try {
-                final responseImg = await http.get(Uri.parse(fotoSource));
-                if (responseImg.statusCode == 200) {
-                  fotoParaEnviar = base64Encode(responseImg.bodyBytes);
-                } else {
-                  print(
-                      'âš ï¸ Falha ao baixar imagem da URL: ${responseImg.statusCode}');
-                  return; // Abortar se não conseguir baixar
-                }
-              } catch (e) {
-                print('Erro ao baixar imagem para reenvio: $e');
-                return;
-              }
-            } else {
-              // Já é Base64 ou caminho local (assumindo Base64 se não for http)
-              fotoParaEnviar = fotoSource;
-            }
-
-            // Limpeza final do base64
-            final fotoClean = fotoParaEnviar.contains(',')
-                ? fotoParaEnviar.split(',').last
-                : fotoParaEnviar;
-
-            try {
-              // Usar pessoacadastro_id, não pessoadocumento_id
-              final payloadFoto = {
-                "condominio_id": int.tryParse(condominioId) ?? 0,
-                "tipoUSU": "USU",
-                "ordem_num": ordem,
-                "pessoacadastro_id": validPessoaCadastroId,
-                "foto": fotoClean,
-              };
-
-              print(
-                  'Enviando foto (Ordem: $ordem) para CADASTRO ID: $validPessoaCadastroId');
-
-              await http.post(
-                urlFoto,
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': 'Bearer $tokenSessao',
-                },
-                body: jsonEncode(payloadFoto),
-              );
-            } catch (e) {
-              print('Erro ao enviar foto ordem $ordem: $e');
-            }
+          bool _uploadFoto = true;
+          //caso tenha puxado a foto do servidor
+          if (fotoRostoClean.startsWith('http')) {
+            _uploadFoto = false;
           }
 
-          // Enviar Rosto (Ordem 1) - Prioriza _fotoBase64 (novo), senão usa _fotoRostoEntrada (pode ser URL)
-          rostoParaEnviar = (_fotoBase64 != null && _fotoBase64!.isNotEmpty)
-              ? _fotoBase64
-              : _fotoRostoEntrada;
-          if (rostoParaEnviar != null) {
-            await enviarFoto(rostoParaEnviar, 1);
-          }
-
-          // Enviar Documento (Ordem 2) - Prioriza _fotoDocumentoBase64 (novo), senão usa _fotoDocumentoEntrada (pode ser URL)
-          docParaEnviar =
-              (_fotoDocumentoBase64 != null && _fotoDocumentoBase64!.isNotEmpty)
-                  ? _fotoDocumentoBase64
-                  : _fotoDocumentoEntrada;
-          if (docParaEnviar != null) {
-            await enviarFoto(docParaEnviar, 2);
+          if (_uploadFoto) {
+            http.post(
+              urlFoto,
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $tokenSessao',
+              },
+              body: jsonEncode({
+                "condominio_id": condominioId,
+                "tipoUSU": "",
+                "ordem_num": 1, // 1 = Rosto
+                "pessoacadastro_id": pessoaCadastroId,
+                "foto": fotoRostoClean,
+              }),
+            );
           }
         }
+
+        // 2. GRAVAR FOTO DO DOCUMENTO (ordem_num: 2)
+        if (_fotoDocumentoEntrada != null &&
+            _fotoDocumentoEntrada!.isNotEmpty) {
+          final fotoDocClean = _fotoDocumentoEntrada!.contains(',')
+              ? _fotoDocumentoEntrada!.split(',').last
+              : _fotoDocumentoEntrada!;
+
+          bool _uploadFoto = true;
+          //caso tenha puxado a foto do servidor
+          if (fotoDocClean.startsWith('http')) {
+            _uploadFoto = false;
+          }
+
+          if (_uploadFoto) {
+            http.post(
+              urlFoto,
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $tokenSessao',
+              },
+              body: jsonEncode({
+                "condominio_id": condominioId,
+                "tipoUSU": "",
+                "ordem_num": 2, // 2 = Documento
+                "pessoacadastro_id": pessoaCadastroId,
+                "foto": fotoDocClean,
+              }),
+            );
+          }
+        }
+
         // Mostrar mensagem de sucesso
         final isAbaAvulso = _tipoFiltroEntrada == 0;
 
@@ -13700,149 +13662,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         context: context,
         title: 'Erro ao Processar',
         message: 'Erro ao processar foto',
-        errorDetails: e.toString(),
-      );
-    }
-  }
-
-  Future<void> _enviarEncomenda() async {
-    print('=== INICIANDO ENVIO DE ENCOMENDA ===');
-
-    setState(() {
-      _loadingEnviarEncomenda = true;
-    });
-
-    try {
-      // Verificar se temos ao menos uma unidade selecionada
-      if (_selectedUnidadesEncomenda.isEmpty) {
-        print('ERRO: Nenhuma unidade selecionada');
-        FeedbackUtils.showError(
-          context: context,
-          title: 'Seleção Obrigatória',
-          message: 'Selecione ao menos uma unidade!',
-        );
-        setState(() {
-          _loadingEnviarEncomenda = false;
-        });
-        return;
-      }
-
-      // Verificar se temos tipo selecionado
-      if (_tipoEncomendaSelecionado == null) {
-        print('ERRO: Tipo de encomenda não selecionado');
-        FeedbackUtils.showError(
-          context: context,
-          title: 'Seleçao Obrigatória',
-          message: 'Selecione o tipo da encomenda!',
-        );
-        setState(() {
-          _loadingEnviarEncomenda = false;
-        });
-        return;
-      }
-
-      print('Unidade selecionada: $_selectedUnidadeEncomenda');
-      print('Tipo selecionado: $_tipoEncomendaSelecionado');
-
-      final testeSemFoto = false; // Mude para true para testar sem foto
-
-      if (testeSemFoto && _fotoEncomenda == null) {
-        print('TESTE: Enviando encomenda sem foto...');
-        await _registrarEncomendaTeste();
-      } else {
-        // Chamar a ção de registro usando API do backup
-        await _registrarEncomenda();
-      }
-    } catch (e) {
-      print('Erro ao enviar encomenda: $e');
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro ao Enviar',
-        message: 'Erro ao enviar encomenda',
-        errorDetails: e.toString(),
-      );
-    } finally {
-      setState(() {
-        _loadingEnviarEncomenda = false;
-      });
-    }
-  }
-
-  // Funçao de teste para enviar encomenda sem foto
-  Future<void> _registrarEncomendaTeste() async {
-    final prefs = await SharedPreferences.getInstance();
-    final encrypted = prefs.getString('tokensessao_txt');
-    final tokenSessao = (encrypted != null && encrypted.isNotEmpty)
-        ? decryptText(encrypted)
-        : '';
-    final encryptedUsuarioId = prefs.getString('usuario_id') ?? '';
-    final usuarioId =
-        (encryptedUsuarioId.isNotEmpty) ? decryptText(encryptedUsuarioId) : '';
-    final usuariodeId = int.tryParse(usuarioId) ?? 0;
-    final usuarioparaId = _selectedUnidadeEncomenda != null
-        ? _selectedUnidadeEncomenda['usuario_id']?.toString() ?? ''
-        : '';
-    final tipoSelecionado = _tipoEncomendaSelecionado != null
-        ? _tipoEncomendaSelecionado!['descricao'] ?? ''
-        : '';
-    final machineIP = await _getMachineIP();
-
-    print('=== TESTE ENVIO ENCOMENDA SEM FOTO ===');
-    print('usuariodeId: $usuariodeId');
-    print('usuarioparaId: "$usuarioparaId"');
-    print('tipoSelecionado: "$tipoSelecionado"');
-    print('machineIP: "$machineIP"');
-
-    final url = Uri.parse(ApiConfig.getEndpoint('encomendas', 'registrar'));
-    final payload = {
-      "usuariode_id": usuariodeId,
-      "usuariopara": usuarioparaId,
-      "avisocategoria_id": 21,
-      "sms_flg": "N",
-      "titulo": "Entrega de encomenda",
-      "texto": tipoSelecionado,
-      "codigobarra": _codigoBarrasEncomendaController.text,
-      "depara_id": _identificacaoInternaEncomendaController.text.trim(),
-      "ip": machineIP,
-      "fotobase64": "", // SEM FOTO PARA TESTE
-    };
-
-    print('Payload teste: $payload');
-
-    try {
-      print('Fazendo requisiçao POST para encomendaregistrar (teste)...');
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
-
-      print('Status Code: ${response.statusCode}');
-      print('Response Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        FeedbackUtils.showSuccess(
-          context: context,
-          title: 'Encomenda Enviada',
-          message: 'Encomenda de teste enviada com sucesso!',
-        );
-      } else {
-        FeedbackUtils.showError(
-          context: context,
-          title: 'Erro no Teste',
-          message: 'Erro no teste',
-          errorDetails: 'Status: ${response.statusCode}',
-        );
-      }
-    } catch (e) {
-      print('Erro na requisiçao: $e');
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro na Requisiçao',
-        message: 'Erro na requisiçao de teste',
         errorDetails: e.toString(),
       );
     }
@@ -14315,16 +14134,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (_filtroDataFimEntrega != null) {
       payload['data_fim'] = _filtroDataFimEntrega!.toIso8601String();
     }
-
-    final result =
-        await EncomendaFetchService.fetchHistoricos(payload: payload);
-    if (mounted) {
-      setState(() {
-        _historicoEncomendasListOriginal = result;
-        _historicoEncomendasList = List.from(result);
-        _loadingHistoricoEncomendas = false;
-      });
-    }
   }
 
   void _aplicarFiltroEntregas() {
@@ -14362,354 +14171,191 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
-  Future<void> _filtrarEncomendasPorUnidade(String unidade) async {
-    setState(() {
-      _loadingHistoricoEncomendas = true;
-    });
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final encryptedCondominioId = prefs.getString('condominio_id') ?? '';
-      final condominioId = (encryptedCondominioId.isNotEmpty)
-          ? decryptText(encryptedCondominioId)
-          : '';
-      final encrypted = prefs.getString('tokensessao_txt');
-      final tokenSessao = (encrypted != null && encrypted.isNotEmpty)
-          ? decryptText(encrypted)
-          : '';
-
-      if (condominioId.isEmpty) {
-        setState(() {
-          _loadingEntregas = false;
-        });
-        return;
-      }
-
-      final url = Uri.parse(ApiConfig.getEndpoint('encomendas', 'lista'));
-      final payload = {
-        "condominio_id": int.tryParse(condominioId) ?? 0,
-        "unidade": unidade
-      };
-
-      print('DEBUG - Filtrando encomendas por unidade: $payload');
-
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final encomendasFiltradas = List<Map<String, dynamic>>.from(
-          data['data']?['lista'] ?? data['lista'] ?? [],
-        );
-
-        print(
-            'API retornou ${encomendasFiltradas.length} encomendas para unidade $unidade');
-
-        // Filtrar adicionalmente no cliente para garantir que só mostra da unidade certa
-        final encomendasUnidadeCorreta = encomendasFiltradas.where((item) {
-          final unidadeItem = (item['unidade'] ?? '').toString();
-          // Verificar se a unidade do item contém o número filtrado
-          return unidadeItem.contains(unidade) ||
-              unidadeItem.startsWith(unidade);
-        }).toList();
-
-        print(
-            'Após filtro cliente: ${encomendasUnidadeCorreta.length} encomendas para unidade $unidade');
-
-        setState(() {
-          _entregasListOriginal = encomendasUnidadeCorreta;
-          _entregasList = List.from(_entregasListOriginal);
-          _historicoEncomendasList = encomendasUnidadeCorreta;
-        });
-
-        print(
-            'Encomendas filtradas por unidade $unidade: ${_entregasList.length}');
-      } else {
-        print('Erro ao filtrar encomendas por unidade: ${response.statusCode}');
-        // Fallback para filtro local se a API falhar
-        final entregasFiltradas = _entregasListOriginal.where((item) {
-          final unidadeItem = (item['unidade'] ?? '').toString().toLowerCase();
-          return unidadeItem.startsWith(unidade.toLowerCase());
-        }).toList();
-
-        setState(() {
-          _entregasList = entregasFiltradas;
-          _historicoEncomendasList = entregasFiltradas;
-        });
-      }
-    } catch (e) {
-      print('Erro ao filtrar encomendas por unidade: $e');
-      // Fallback para filtro local se der erro
-      final entregasFiltradas = _entregasListOriginal.where((item) {
-        final unidadeItem = (item['unidade'] ?? '').toString().toLowerCase();
-        return unidadeItem.startsWith(unidade.toLowerCase());
-      }).toList();
-
-      setState(() {
-        _entregasList = entregasFiltradas;
-        _historicoEncomendasList = entregasFiltradas;
-      });
-    } finally {
-      setState(() {
-        _loadingHistoricoEncomendas = false;
-      });
-    }
-  }
-
-  Future<void> _filtrarEncomendasPorCodigoBarras() async {
-    final codigo = _filtroCodigoBarrasEntregaController.text.trim();
-    if (codigo.isEmpty) {
-      _fetchEntregas();
-      return;
-    }
-
-    setState(() {
-      _loadingHistoricoEncomendas = true;
-    });
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final encryptedCondominioId = prefs.getString('condominio_id') ?? '';
-      final condominioId = (encryptedCondominioId.isNotEmpty)
-          ? decryptText(encryptedCondominioId)
-          : '';
-      final encrypted = prefs.getString('tokensessao_txt');
-      final tokenSessao = (encrypted != null && encrypted.isNotEmpty)
-          ? decryptText(encrypted)
-          : '';
-
-      if (condominioId.isEmpty) {
-        setState(() => _loadingHistoricoEncomendas = false);
-        return;
-      }
-
-      final url = Uri.parse(ApiConfig.getEndpoint('encomendas', 'lista'));
-      final payload = {
-        "condominio_id": int.tryParse(condominioId) ?? 0,
-        "codigobarra": codigo,
-        "depara_id": _identificacaoInternaEntregaController.text.trim(),
-      };
-
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final lista = List<Map<String, dynamic>>.from(
-          data['data']?['lista'] ?? data['lista'] ?? [],
-        );
-
-        setState(() {
-          _entregasListOriginal = lista;
-          _entregasList = List.from(lista);
-          _historicoEncomendasList = List.from(lista);
-        });
-      } else {
-        setState(() {
-          _entregasListOriginal = [];
-          _entregasList = [];
-          _historicoEncomendasList = [];
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _entregasListOriginal = [];
-        _entregasList = [];
-        _historicoEncomendasList = [];
-      });
-    } finally {
-      setState(() => _loadingHistoricoEncomendas = false);
-    }
-  }
-
+// Expande a opção de botões ao clicar em "Registrar Saída"
   void _mostrarOpcoesSaida(Map<String, dynamic> passagem) {
-    // Expandir card ao invés de abrir modal
-    final passagemId =
+    final id =
         passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? '';
-    final uniqueKey = 'saida_$passagemId';
+    if (id.isEmpty) return;
 
     setState(() {
-      if (_cardsExpandidos.contains(uniqueKey)) {
-        _cardsExpandidos.remove(uniqueKey);
+      final key = 'saida_$id';
+      if (_cardsExpandidos.contains(key)) {
+        _cardsExpandidos.remove(key);
       } else {
-        // Fechar outros cards expandidos de saídas
-        _cardsExpandidos.removeWhere((key) => key.startsWith('saida_'));
-        _cardsExpandidos.add(uniqueKey);
+        _cardsExpandidos.add(key);
       }
     });
   }
 
   Future<void> _selecionarHorarioSaida(Map<String, dynamic> passagem) async {
-    DateTime? dataSelecionada;
-    TimeOfDay? horaSelecionada;
-
-    // Primeiro: selecionar data
-    final DateTime? pickedDate = await showDatePicker(
+    final dataEscolhida = await showDatePicker(
       context: context,
       initialDate: DateTime.now(),
-      firstDate: DateTime(2015),
-      lastDate: DateTime(2030),
-      locale: const Locale('pt', 'BR'),
+      firstDate: DateTime.now().subtract(const Duration(days: 30)),
+      lastDate: DateTime.now(),
     );
 
-    if (pickedDate != null) {
-      dataSelecionada = pickedDate;
-
-      // Segundo: selecionar hora
-      final TimeOfDay? pickedTime = await showTimePicker(
+    if (dataEscolhida != null && mounted) {
+      final horaEscolhida = await showTimePicker(
         context: context,
         initialTime: TimeOfDay.now(),
-        builder: (BuildContext context, Widget? child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              timePickerTheme: TimePickerThemeData(
-                backgroundColor: getBackgroundColor(context),
-                hourMinuteTextColor: getTextColor(context),
-                dialHandColor: const Color(0xFF684F8E),
-                dialBackgroundColor: getCardColor(context),
-              ),
-            ),
-            child: child!,
-          );
-        },
       );
 
-      if (pickedTime != null) {
-        horaSelecionada = pickedTime;
-
-        // Combinar data e hora
-        final DateTime dataHoraSaida = DateTime(
-          dataSelecionada.year,
-          dataSelecionada.month,
-          dataSelecionada.day,
-          horaSelecionada.hour,
-          horaSelecionada.minute,
+      if (horaEscolhida != null) {
+        final dataFinal = DateTime(
+          dataEscolhida.year,
+          dataEscolhida.month,
+          dataEscolhida.day,
+          horaEscolhida.hour,
+          horaEscolhida.minute,
         );
-
-        // Registrar saída com data/hora selecionada
-        _registrarSaida(passagem, dataHoraSaida: dataHoraSaida);
+        _registrarSaida(passagem, saidaAgora: false, dataSaida: dataFinal);
       }
     }
   }
+// -------------------------------------------------------------
+  // FUNÇÕES DE REGISTRO E CONTROLE DE SAÍDA (INDIVIDUAL E EM LOTE)
+  // -------------------------------------------------------------
 
   Future<void> _registrarSaida(Map<String, dynamic> passagem,
-      {bool saidaAgora = false, DateTime? dataHoraSaida}) async {
+      {bool saidaAgora = true, DateTime? dataSaida}) async {
     final passagemId =
         passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? '';
+    final reservaId = passagem['reserva_id']?.toString() ??
+        passagem['id_pai']?.toString() ??
+        '';
+    final reservaconvidadoId = passagem['reservaconvidado_id']?.toString() ??
+        passagem['id_filho']?.toString() ??
+        '';
 
-    // Adicionar loading state
-    setState(() {
-      _loadingSaidas.add(passagemId);
-    });
+    // Verifica se é Agendamento ou Passagem Avulsa
+    final isAgendamento = reservaId.isNotEmpty &&
+        reservaId != '0' &&
+        reservaconvidadoId.isNotEmpty &&
+        reservaconvidadoId != '0';
 
-    final prefs = await SharedPreferences.getInstance();
-    final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
-    final tokenSessao =
-        (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-
-    if (tokenSessao.isEmpty) {
-      setState(() {
-        _loadingSaidas.remove(passagemId);
-      });
+    if (passagemId.isEmpty && !isAgendamento) {
+      FeedbackUtils.showError(
+        context: context,
+        title: 'Dados Inválidos',
+        message: 'Não foi possível identificar o ID do registro para saída.',
+      );
       return;
     }
 
-    // Usar o endpoint do backup: baixaManual
-    final url = Uri.parse(ApiConfig.getEndpoint('dashboard', 'baixaManual'));
+    final idLock = isAgendamento ? reservaconvidadoId : passagemId;
 
-    // Usar data/hora fornecida ou data/hora atual
-    final saidaDateTime = dataHoraSaida ?? DateTime.now();
-    final dtSaida =
-        "${saidaDateTime.day.toString().padLeft(2, '0')}-${saidaDateTime.month.toString().padLeft(2, '0')}-${saidaDateTime.year.toString().padLeft(4, '0')} ${saidaDateTime.hour.toString().padLeft(2, '0')}:${saidaDateTime.minute.toString().padLeft(2, '0')}:${saidaDateTime.second.toString().padLeft(2, '0')}";
-
-    final payload = {
-      "avulsopassagem_id": passagem['id'] ?? passagem['passagem_id'] ?? 0,
-      "leitor_id_saida": 0,
-      "dt_saida": dtSaida,
-    };
+    // Travar o botão para evitar duplo clique
+    setState(() {
+      _loadingSaidas.add(idLock);
+    });
 
     try {
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
+      final prefs = await SharedPreferences.getInstance();
+      final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
+      final tokenSessao =
+          encryptedToken.isNotEmpty ? decryptText(encryptedToken) : '';
+      final condominioId = await getCondominioIdAtual();
 
-      // === SOLUÇÃO 1: Adicione esta linha aqui ===
-      if (!mounted) return;
+      bool sucesso = false;
+      String errorMessage = 'Falha ao processar saída.';
 
-      if (response.statusCode == 200) {
-        // Fechar card expandido e remover loading
-        final uniqueKey = 'saida_$passagemId';
-        setState(() {
-          _cardsExpandidos.remove(uniqueKey);
-          _loadingSaidas.remove(passagemId);
-
-          // === SOLUÇÃO: Injetar a saída nas listas locais imediatamente ===
-          for (var p in _passagens) {
-            if ((p['id']?.toString() ?? p['passagem_id']?.toString()) ==
-                passagemId) {
-              p['dt_saida'] = dtSaida;
-            }
-          }
-          for (var p in _historicoFiltrado) {
-            if ((p['id']?.toString() ?? p['passagem_id']?.toString()) ==
-                passagemId) {
-              p['dt_saida'] = dtSaida;
-            }
-          }
-        });
-
-        // ... resto do seu código (FeedbackUtils.showSuccess, etc)
-
-        // Recarregar lista de saídas para garantir atualização
-        await _buscarSaidasFiltradas();
-
-        // Limpar formulário de entrada após saída (como no backup)
-        await _limparFormularioEntrada();
+      if (isAgendamento) {
+        // Fluxo de Saída de Agendamento (convidados/mover)
+        sucesso = await registrarEntradaSaidaGlobal(
+            reservaId, reservaconvidadoId, false);
       } else {
-        // Remover loading state
+        // Fluxo de Saída Manual de Passagem (dashboard/baixaManual)
+        final url =
+            Uri.parse(ApiConfig.getEndpoint('dashboard', 'baixaManual'));
+
+        final payload = <String, dynamic>{
+          "condominio_id": condominioId,
+          "avulsopassagem_id": int.tryParse(passagemId) ?? 0,
+        };
+
+        // O backend EXIGE a data de saída sempre.
+        if (saidaAgora) {
+          final now = DateTime.now();
+          payload["dt_saida"] =
+              '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+        } else if (dataSaida != null) {
+          payload["dt_saida"] =
+              '${dataSaida.year}-${dataSaida.month.toString().padLeft(2, '0')}-${dataSaida.day.toString().padLeft(2, '0')} ${dataSaida.hour.toString().padLeft(2, '0')}:${dataSaida.minute.toString().padLeft(2, '0')}:00';
+        }
+        final response = await http.post(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $tokenSessao',
+          },
+          body: jsonEncode(payload),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['status'] == 200 ||
+              data['status'] == 'OK' ||
+              data['data'] != null) {
+            sucesso = true;
+          } else {
+            errorMessage = data['message'] ?? errorMessage;
+          }
+        } else {
+          errorMessage = 'Erro no servidor: ${response.statusCode}';
+        }
+      }
+
+// Feedback Operacional para o Porteiro
+      if (sucesso) {
+        // 👇 Removemos o FeedbackUtils.showSuccess e usamos a variável nativa da tela
         setState(() {
-          _loadingSaidas.remove(passagemId);
+          _feedbackMessageEntrada = 'A saída foi registrada com sucesso!';
         });
 
+        // Limpa a mensagem após 4 segundos automaticamente
+        Future.delayed(const Duration(seconds: 4), () {
+          if (mounted) {
+            setState(() {
+              if (_feedbackMessageEntrada ==
+                  'A saída foi registrada com sucesso!') {
+                _feedbackMessageEntrada = '';
+              }
+            });
+          }
+        });
+
+        // Recolher o card
+        setState(() {
+          _cardsExpandidos.remove('saida_$passagemId');
+        });
+
+        // Atualizar lista em tempo real para exibir o card como "Saída Registrada"
+        if (_tabAvulsoAgendamentosSaidas == 2) {
+          await _buscarSaidasFiltradas();
+        } else {
+          await _buscarHistoricoFiltrado(true);
+        }
+      } else {
         FeedbackUtils.showError(
           context: context,
-          title: 'Erro ao Registrar',
-          message: 'Erro ao registrar saída',
-          errorDetails: 'Status: ${response.statusCode}\n${response.body}',
+          title: 'Atenção',
+          message: errorMessage,
         );
       }
     } catch (e) {
-      // === SOLUÇÃO 1: E adicione esta linha aqui também ===
-      if (!mounted) return;
-
-      // Remover loading state
-      setState(() {
-        _loadingSaidas.remove(passagemId);
-      });
-
       FeedbackUtils.showError(
         context: context,
         title: 'Erro de Conexão',
-        message: 'Erro ao conectar',
-        errorDetails: e.toString(),
+        message: 'Verifique sua internet e tente novamente.',
       );
+    } finally {
+      // Destravar o botão independentemente do resultado
+      if (mounted) {
+        setState(() {
+          _loadingSaidas.remove(idLock);
+        });
+      }
     }
   }
 
@@ -14810,30 +14456,72 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _executarBaixaEmLote() async {
     if (_itensSelecionados.isEmpty) return;
 
-    final passagensSelecionadas = _itensSelecionados
-        .map((index) {
-          final todasFiltradas = _getTodasPassagensFiltradas();
-          return index < todasFiltradas.length ? todasFiltradas[index] : null;
-        })
-        .whereType<Map<String, dynamic>>()
-        .toList();
-
-    if (passagensSelecionadas.isEmpty) return;
-
-    int sucessos = 0;
-    int erros = 0;
-
     setState(() {
       _loadingPassagens = true;
     });
 
-    // Processar cada passagem selecionada
-    for (final passagem in passagensSelecionadas) {
+    int sucessos = 0;
+    int falhas = 0;
+    //final listaBase = _getTodasPassagensFiltradas();
+    final listaBase = [];
+
+    for (int index in _itensSelecionados) {
+      if (index >= listaBase.length) continue;
+
+      final passagem = listaBase[index];
+      final passagemId = passagem['id']?.toString() ??
+          passagem['passagem_id']?.toString() ??
+          '';
+
+      if (passagemId.isEmpty) {
+        falhas++;
+        continue;
+      }
+
       try {
-        await _registrarSaida(passagem);
-        sucessos++;
+        final prefs = await SharedPreferences.getInstance();
+        final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
+        final tokenSessao =
+            encryptedToken.isNotEmpty ? decryptText(encryptedToken) : '';
+        final condominioId = await getCondominioIdAtual();
+
+        final url =
+            Uri.parse(ApiConfig.getEndpoint('dashboard', 'baixaManual'));
+
+        // Gera a data/hora exata do momento do clique para enviar a todas as baixas
+        final now = DateTime.now();
+        final dtSaidaLote =
+            '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+
+        final Map<String, dynamic> payload = {
+          "condominio_id": condominioId,
+          "avulsopassagem_id": int.tryParse(passagemId) ?? 0,
+          "dt_saida": dtSaidaLote, // <- Adicionado campo obrigatório
+        };
+
+        final response = await http.post(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $tokenSessao',
+          },
+          body: jsonEncode(payload),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['status'] == 200 ||
+              data['status'] == 'OK' ||
+              data['data'] != null) {
+            sucessos++;
+          } else {
+            falhas++;
+          }
+        } else {
+          falhas++;
+        }
       } catch (e) {
-        erros++;
+        falhas++;
       }
     }
 
@@ -14841,35 +14529,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _loadingPassagens = false;
       _itensSelecionados.clear();
       _modoAutoBaixa = false;
+
+      // 👇 Usamos a variável nativa da tela para mostrar o total de baixas
+      _feedbackMessageEntrada =
+          '$sucessos saída(s) registrada(s). ${falhas > 0 ? 'Falhas: $falhas' : ''}';
     });
 
-    // Mostrar resultado
-    String mensagem = '';
-    if (sucessos > 0 && erros == 0) {
-      mensagem =
-          'Baixa em lote realizada com sucesso! $sucessos item(s) processado(s).';
-    } else if (sucessos > 0 && erros > 0) {
-      mensagem = 'Baixa em lote parcial: $sucessos sucesso(s), $erros erro(s).';
+    Future.delayed(const Duration(seconds: 4), () {
+      if (mounted) {
+        setState(() {
+          // Limpa se a mensagem ainda for a de lote
+          if (_feedbackMessageEntrada.contains('saída(s) registrada(s)')) {
+            _feedbackMessageEntrada = '';
+          }
+        });
+      }
+    });
+    // Refresh geral
+    if (_tabAvulsoAgendamentosSaidas == 2) {
+      await _buscarSaidasFiltradas();
     } else {
-      mensagem = 'Erro na baixa em lote: $erros erro(s).';
+      await _buscarHistoricoFiltrado(true);
     }
-
-    if (sucessos > 0) {
-      FeedbackUtils.showSuccess(
-        context: context,
-        title: 'Baixa em Lote',
-        message: mensagem,
-      );
-    } else {
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro na Baixa',
-        message: mensagem,
-      );
-    }
-
-    // Recarregar dados
-    // await _fetchPassagens(); // Desativado - passagens vêm do SignalR
   }
 
   Future<void> _abrirModalConvidados(String reservaId) async {
@@ -14965,20 +14646,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // Funçao para fechar painel lateral
   void _fecharPainelLateral() {
-    setState(() {
-      _isSidePanelOpen = false;
-      // Esperar a animação terminar antes de limpar o widget
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted && !_isSidePanelOpen) {
-          setState(() {
-            _sidePanelCurrentWidget = null;
-            _currentSidePanelWidth = 0;
-          });
-        }
-      });
-    });
-
-    // Remover painel atual
+    // Remover painel atual antes de qualquer setState
     _painelLateralOverlay?.remove();
     _painelLateralOverlay = null;
 
@@ -14989,9 +14657,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _painelAnteriorOverlay = null;
       _fecharPainelAnteriorFunction = null;
     } else {
-      // Nenhum painel anterior, restaurar funá§ões padrão
+      // Nenhum painel anterior, restaurar funções padrão
       fecharPainelLateralGlobal = () {};
     }
+
+    // Atualizar estado — Future.delayed fora do setState (anti-pattern corrigido)
+    if (mounted) {
+      setState(() {
+        _isSidePanelOpen = false;
+      });
+    }
+
+    // Aguardar animação e limpar widget
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && !_isSidePanelOpen) {
+        setState(() {
+          _sidePanelCurrentWidget = null;
+          _currentSidePanelWidth = 0;
+        });
+      }
+    });
   }
 
   // Painel anterior para voltar
@@ -15110,176 +14795,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Funçao para abrir tela de seleçao de pessoa
-
-  // Funçao para registrar entrega de encomenda
-  Future<void> _registrarEntregaEncomenda(
-    Map<String, dynamic> encomenda, {
-    required bool usarToken,
-    required String token,
-    Uint8List? fotoMorador,
-    Uint8List? fotoEncomenda,
-  }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final encrypted = prefs.getString('tokensessao_txt');
-    final tokenSessao = (encrypted != null && encrypted.isNotEmpty)
-        ? decryptText(encrypted)
-        : '';
-
-    final url = Uri.parse(ApiConfig.getEndpoint('encomendas', 'entrega'));
-
-    // Preparar dados da entrega
-    final avisoId = encomenda['aviso_id'] ??
-        encomenda['avisoentrega_id'] ??
-        encomenda['id'];
-    final tokenTratado = usarToken ? token : '';
-
-    final payload = {
-      "avisoentrega_id": avisoId,
-      "statusentrega_id": 123,
-      "retiradoPor": "Sistema",
-      "entreguePor": "Encomendas",
-      "tokenRetirou": tokenTratado,
-      "mensagem": "Entrega realizada via sistema",
-    };
-
-    try {
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
-
-      if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body);
-        final itemKey = (encomenda['aviso_id'] ??
-                encomenda['avisoentrega_id'] ??
-                encomenda['id'])
-            .toString();
-
-        // Validação de Token conforme PRD (erro == 1)
-        if (responseData['erro'] == 1) {
-          if (mounted) {
-            FeedbackUtils.showError(
-              context: context,
-              title: 'Token Inválido',
-              message:
-                  responseData['message'] ?? 'O token informado não é válido.',
-            );
-          }
-          return;
-        }
-
-        // Upload de novas fotos se houver
-        final int? protocoloId = int.tryParse(avisoId.toString());
-        if (protocoloId != null) {
-          if (fotoMorador != null) {
-            final usuarioparaId =
-                (encomenda['usuario_id'] ?? encomenda['usuario_para_id'] ?? 0);
-            await _uploadFotoEntregaPessoa(
-                usuarioparaId.toString(), fotoMorador);
-          }
-          if (fotoEncomenda != null) {
-            await _uploadFotoEncomenda(protocoloId, fotoEncomenda);
-          }
-        }
-
-        if (mounted) {
-          setState(() {
-            _itemFeedbackMessages[itemKey] = 'Entregue com sucesso';
-          });
-        }
-        _fecharPainelLateral();
-
-        // Aguardar 3 segundos para mostrar a mensagem e depois sumir o card
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) {
-            setState(() {
-              _itemFeedbackMessages.remove(itemKey);
-              _historicoEncomendasList.removeWhere((item) =>
-                  (item['aviso_id'] ?? item['avisoentrega_id'] ?? item['id'])
-                      .toString() ==
-                  itemKey);
-              _entregasList.removeWhere((item) =>
-                  (item['aviso_id'] ?? item['avisoentrega_id'] ?? item['id'])
-                      .toString() ==
-                  itemKey);
-            });
-          }
-        });
-      } else {
-        FeedbackUtils.showError(
-          context: context,
-          title: 'Erro ao Registrar',
-          message: 'Erro ao registrar entrega',
-          errorDetails: 'Status: ${response.statusCode}',
-        );
-      }
-    } catch (e) {
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro ao Registrar',
-        message: 'Erro ao registrar entrega',
-        errorDetails: e.toString(),
-      );
-    }
-  }
-
-  // Funçao para carregar fotos da entrega
-  void _carregarFotosEntrega(Map<String, dynamic> encomenda) {
-    // Extrair IDs necessários
-    // Prioritizar avisoentrega_id para busca de imagem, conforme solicitado pelo usuário
-    final protocolo = encomenda['protocolo']?.toString() ??
-        encomenda['avisoentrega_id']?.toString() ??
-        encomenda['id']?.toString() ??
-        '';
-
-    final protocoloId = int.tryParse(protocolo) ?? 0;
-    final userId = encomenda['usuarioPara_Id'] ??
-        encomenda['usuario_id'] ??
-        encomenda['usuario_para_id'] ??
-        0;
-
-    // Limpar fotos anteriores
-    _fotoFacialEntrega = null;
-    _fotoEncomendaEntrega = null;
-
-    // Carregar foto do usuário (morador)
-    if (userId > 0) {
-      _getUserPhoto(userId).then((fotoBase64) {
-        if (fotoBase64 != null && fotoBase64.isNotEmpty && mounted) {
-          try {
-            final fotoBytes = base64Decode(fotoBase64);
-            setState(() {
-              _fotoFacialEntrega = fotoBytes;
-            });
-          } catch (e) {
-            // Ignora erro de decodificaçao
-          }
-        }
-      });
-    }
-
-    // Carregar foto da encomenda
-    if (protocoloId > 0) {
-      _getEncomendaPhoto(protocoloId).then((fotoBase64) {
-        if (fotoBase64 != null && fotoBase64.isNotEmpty && mounted) {
-          try {
-            final fotoBytes = base64Decode(fotoBase64);
-            setState(() {
-              _fotoEncomendaEntrega = fotoBytes;
-            });
-          } catch (e) {
-            // Ignora erro de decodificaçao
-          }
-        }
-      });
-    }
-  }
-
   // Busca a foto do usuário (morador) por userId. Retorna base64 ou null.
   Future<String?> _getUserPhoto(dynamic userId) async {
     try {
@@ -15359,154 +14874,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     } catch (_) {}
     return null;
-  }
-
-  // Busca a foto da encomenda por protocoloId. Retorna base64 ou null.
-  Future<String?> _getEncomendaPhoto(int protocoloId) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
-      final tokenSessao =
-          (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-      if (tokenSessao.isEmpty) return null;
-
-      final condominioId = await ApiConfig.getCondominioId();
-      // URL atualizada para encomendaimagem (GET)
-      final url = Uri.parse(
-          'https://gate.conectcon.net.br/pt-br/encomendaimagem?id=$protocoloId&index=1&condominio_id=$condominioId');
-
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer $tokenSessao',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        // Se a resposta for imagem direta, converter para base64
-        if (response.headers['content-type']?.startsWith('image/') ?? false) {
-          return base64Encode(response.bodyBytes);
-        }
-
-        final responseData = jsonDecode(response.body);
-
-        // 1. Tentar extrair URL se presente (conforme reportado recentemente pelo usuário)
-        String? fotoUrl = (responseData['url'] ??
-                responseData['imageUrl'] ??
-                responseData['imagem'] ??
-                responseData['data']?['url'])
-            ?.toString();
-
-        if (fotoUrl != null && fotoUrl.isNotEmpty && fotoUrl != 'null') {
-          try {
-            final imgResponse = await http.get(Uri.parse(fotoUrl));
-            if (imgResponse.statusCode == 200) {
-              return base64Encode(imgResponse.bodyBytes);
-            }
-          } catch (e) {
-            print('Erro ao carregar imagem externa de encomenda: $e');
-          }
-        }
-
-        // 2. Fallback para base64 nos campos tradicionais
-        final data = responseData['data'];
-        String? fotoBase64;
-        if (data is Map) {
-          fotoBase64 =
-              (data['fotobase64'] ?? data['fotoBase64'] ?? data['foto_base64'])
-                  ?.toString();
-        } else if (data is List && data.isNotEmpty && data.first is Map) {
-          fotoBase64 = (data.first['fotobase64'] ??
-                  data.first['fotoBase64'] ??
-                  data.first['foto_base64'])
-              ?.toString();
-        } else {
-          fotoBase64 = (responseData['fotobase64'] ??
-                  responseData['fotoBase64'] ??
-                  responseData['foto_base64'])
-              ?.toString();
-        }
-
-        if (fotoBase64 != null &&
-            fotoBase64.isNotEmpty &&
-            fotoBase64 != 'null') {
-          if (fotoBase64.contains(',')) {
-            fotoBase64 = fotoBase64.split(',').last;
-          }
-          return fotoBase64;
-        }
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  // Funçao para reenviar entrega
-  Future<void> _reenviarEntrega(Map<String, dynamic> entrega) async {
-    final avisoId = entrega['avisoentrega_id'] ?? entrega['aviso_id'];
-    if (avisoId == null) return;
-
-    final prefs = await SharedPreferences.getInstance();
-    final encrypted = prefs.getString('tokensessao_txt');
-    final tokenSessao = (encrypted != null && encrypted.isNotEmpty)
-        ? decryptText(encrypted)
-        : '';
-
-    final url = Uri.parse(
-      ApiConfig.getEndpoint('encomendas', 'reenvioEntrega'),
-    );
-    final payload = {"id": avisoId};
-
-    try {
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
-
-      final itemKey = avisoId.toString();
-
-      if (response.statusCode == 200) {
-        setState(() {
-          _itemFeedbackMessages[itemKey] = 'Reenviado com sucesso';
-        });
-
-        // Limpar após 3 segundos
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) {
-            setState(() {
-              _itemFeedbackMessages.remove(itemKey);
-            });
-          }
-        });
-      } else {
-        setState(() {
-          _itemFeedbackMessages[itemKey] =
-              'Erro ao reenviar: ${response.statusCode}';
-        });
-        Future.delayed(const Duration(seconds: 5), () {
-          if (mounted) {
-            setState(() {
-              _itemFeedbackMessages.remove(itemKey);
-            });
-          }
-        });
-      }
-    } catch (e) {
-      final itemKey = avisoId.toString();
-      setState(() {
-        _itemFeedbackMessages[itemKey] = 'Erro: $e';
-      });
-      Future.delayed(const Duration(seconds: 5), () {
-        if (mounted) {
-          setState(() {
-            _itemFeedbackMessages.remove(itemKey);
-          });
-        }
-      });
-    }
   }
 
   // Funçao para abrir painel lateral usando Overlay
@@ -15638,715 +15005,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _filtroDataFimSelecionada = picked.end;
       });
     }
-  }
-
-  // Funá§ões para aá§ões das entregas
-  Future<void> _visualizarFotoEncomenda(Map<String, dynamic> entrega) async {
-    // Implementar visualizaçao da foto da encomenda
-    // TODO: Implementar modal com foto da encomenda
-  }
-
-  Future<void> _marcarComoEntregue(Map<String, dynamic> entrega) async {
-    // Implementar marcaçao como entregue
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
-      final tokenSessao =
-          (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-
-      if (tokenSessao.isEmpty) {
-        FeedbackUtils.showError(
-          context: context,
-          title: 'Erro de Autenticaçao',
-          message: 'Token de sessá£o inválido',
-        );
-        return;
-      }
-
-      final url =
-          Uri.parse(ApiConfig.getEndpoint('entregas', 'marcar-entregue'));
-      final payload = {
-        'entrega_id': entrega['id'],
-      };
-
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
-
-      if (response.statusCode == 200) {
-        final itemKey = entrega['id']?.toString() ??
-            entrega['avisoentrega_id']?.toString() ??
-            '';
-        setState(() {
-          _itemFeedbackMessages[itemKey] = 'Realizado com sucesso';
-        });
-
-        // Limpar após 3 segundos
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) {
-            setState(() {
-              _itemFeedbackMessages.remove(itemKey);
-            });
-          }
-        });
-        await _fetchEntregas(); // Recarregar lista
-      } else {
-        FeedbackUtils.showError(
-          context: context,
-          title: 'Erro',
-          message: 'Erro ao marcar como entregue',
-          errorDetails: 'Status: ${response.statusCode}',
-        );
-      }
-    } catch (e) {
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro de Conexá£o',
-        message: 'Erro ao conectar com servidor',
-        errorDetails: e.toString(),
-      );
-    }
-  }
-
-  void _mostrarDetalhesEntrega(Map<String, dynamic> entrega) {
-    _abrirPainelLateral(
-      _DetalhesEntregaPanel(
-        entrega: entrega,
-        onClose: () => fecharPainelLateralGlobal(),
-      ),
-    );
-  }
-
-  void _visualizarPdfEncomenda(Map<String, dynamic> entrega) async {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Gerando PDF...')),
-    );
-
-    try {
-      final pdfBytes = await DeliveryPdfService().generateDeliveryPdf(entrega);
-      final id = entrega['id'] ??
-          entrega['avisoentrega_id'] ??
-          DateTime.now().millisecondsSinceEpoch;
-      final fileName = 'Comprovante_Entrega_$id.pdf';
-
-      if (!mounted) return;
-
-      final path = await downloadFile(pdfBytes, fileName);
-
-      if (!mounted) return;
-
-      if (path != null) {
-        FeedbackUtils.showSuccess(
-          context: context,
-          title: 'Sucesso',
-          message: 'PDF salvo em: $path',
-        );
-      }
-      // For web, downloadFile returns null but handles download automatically
-    } catch (e) {
-      if (!mounted) return;
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro',
-        message: 'Erro ao gerar PDF: $e',
-      );
-    }
-  }
-
-  Widget _buildCancelInlineForm(Map<String, dynamic> entrega, String itemKey) {
-    final ctrl =
-        _cancelMsgCtrls.putIfAbsent(itemKey, () => TextEditingController());
-    final loading = _cancelLoading.contains(itemKey);
-    final isDark = isDarkMode(context);
-    final bool podeConfirmar = !loading && ctrl.text.trim().isNotEmpty;
-    final Color textColor = getTextColor(context);
-    final Color subtleText = getSecondaryTextColor(context);
-    final Color borderColor =
-        isDark ? Colors.grey.shade700 : Colors.grey.shade300;
-    final Color confirmColor = const Color(0xFF28A745);
-
-    return Padding(
-      key: ValueKey('cancel_form_$itemKey'),
-      padding: const EdgeInsets.only(top: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Divider(height: 1, color: borderColor),
-          const SizedBox(height: 12),
-          Text(
-            'Motivo do cancelamento',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: textColor,
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: ctrl,
-            enabled: !loading,
-            onChanged: (_) => setState(() {}),
-            minLines: 1,
-            maxLines: 3,
-            decoration: inputDecorationPadrao(
-              context,
-              hintText: 'Descreva o motivo',
-            ),
-          ),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TransparentIconGroup([
-              IconActionData(
-                icon: Icons.arrow_back,
-                tooltip: 'Voltar',
-                color: subtleText,
-                onPressed: loading
-                    ? null
-                    : () => setState(() => _cancellingItemId = null),
-              ),
-              IconActionData(
-                icon: Icons.check,
-                tooltip: 'Confirmar cancelamento',
-                color: confirmColor,
-                isLoading: loading,
-                onPressed: podeConfirmar
-                    ? () => _confirmarCancelamento(entrega)
-                    : null,
-              ),
-            ]),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _cancelarEntrega(Map<String, dynamic> entrega) {
-    final avisoId =
-        entrega['avisoentrega_id'] ?? entrega['aviso_id'] ?? entrega['id'];
-    if (avisoId == null) return;
-    final itemKey = avisoId.toString();
-
-    setState(() {
-      if (_cancellingItemId == itemKey) {
-        _cancellingItemId = null;
-      } else {
-        _cancellingItemId = itemKey;
-        _cancelMsgCtrls.putIfAbsent(itemKey, () => TextEditingController());
-      }
-    });
-  }
-
-  Future<void> _confirmarCancelamento(Map<String, dynamic> entrega) async {
-    final avisoId =
-        entrega['avisoentrega_id'] ?? entrega['aviso_id'] ?? entrega['id'];
-    if (avisoId == null) return;
-    final itemKey = avisoId.toString();
-    final ctrl = _cancelMsgCtrls[itemKey];
-    final mensagem = ctrl?.text.trim() ?? '';
-    if (mensagem.isEmpty) return;
-
-    setState(() => _cancelLoading.add(itemKey));
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
-      final tokenSessao =
-          (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-
-      if (tokenSessao.isEmpty) {
-        FeedbackUtils.showError(
-          context: context,
-          title: 'Erro de Autenticação',
-          message: 'Token de sessão inválido',
-        );
-        return;
-      }
-
-      final entreguePor = await ApiConfig.getUsuarioNome();
-
-      final url = Uri.parse(ApiConfig.getEndpoint('encomendas', 'entrega'));
-      final payload = {
-        'avisoentrega_id': avisoId,
-        'statusentrega_id': 125,
-        'retiradoPor': 'Sistema',
-        'entreguePor': entreguePor,
-        'tokenRetirou': '',
-        'mensagem': mensagem,
-      };
-
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
-
-      if (response.statusCode == 200) {
-        ctrl?.dispose();
-        _cancelMsgCtrls.remove(itemKey);
-        setState(() {
-          _cancellingItemId = null;
-          _itemFeedbackMessages[itemKey] = 'Cancelado com sucesso';
-        });
-
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) {
-            setState(() {
-              _itemFeedbackMessages.remove(itemKey);
-            });
-          }
-        });
-        await _fetchEntregas();
-      } else {
-        FeedbackUtils.showError(
-          context: context,
-          title: 'Erro',
-          message: 'Erro ao cancelar entrega',
-          errorDetails:
-              'Status: ${response.statusCode}\nResposta: ${response.body}',
-        );
-      }
-    } catch (e) {
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro de Conexão',
-        message: 'Erro ao conectar com servidor',
-        errorDetails: e.toString(),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _cancelLoading.remove(itemKey));
-      }
-    }
-  }
-
-  // Funçao para capturar foto de encomenda no painel de encomendas
-  Future<void> _tirarFotoEncomenda() async {
-    setState(() {
-      _loadingFotoEncomenda = true;
-    });
-
-    try {
-      if (mounted) {
-        setState(() {
-          _loadingFotoEncomenda = false;
-        });
-      }
-
-      final globalContext = _dashboardContext ?? context;
-      final result = await showDialog<String>(
-        context: globalContext,
-        barrierColor: Colors.black.withValues(alpha: 0.5),
-        builder: (context) => const FacialCaptureModal(
-          isFrontal: false,
-          title: 'Capturar foto da encomenda',
-          isQuadrado: true,
-        ),
-      );
-
-      if (result != null) {
-        await _processarFotoCapturadaEncomenda(result);
-      }
-    } catch (e) {
-      setState(() {
-        _loadingFotoEncomenda = false;
-      });
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro ao Capturar',
-        message: 'Erro ao capturar foto',
-        errorDetails: e.toString(),
-      );
-    }
-  }
-
-  // Processar foto capturada de encomenda
-  Future<void> _processarFotoCapturadaEncomenda(String dataUrl) async {
-    try {
-      if (dataUrl.isEmpty || !dataUrl.contains(',')) {
-        return;
-      }
-
-      // Converter dataUrl para bytes
-      final base64Data = dataUrl.split(',').last;
-      if (base64Data.isEmpty) {
-        return;
-      }
-
-      final bytes = base64Decode(base64Data);
-      if (bytes.isEmpty) {
-        return;
-      }
-
-      setState(() {
-        _fotoEncomenda = bytes;
-      });
-
-      FeedbackUtils.showSuccess(
-        context: context,
-        title: 'Foto Capturada',
-        message: 'Foto da encomenda capturada com sucesso!',
-      );
-    } catch (e) {
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro ao Processar',
-        message: 'Erro ao processar foto',
-        errorDetails: e.toString(),
-      );
-    } finally {
-      setState(() {
-        _loadingFotoEncomenda = false;
-      });
-    }
-  }
-
-  void _limparFormularioEncomenda() {
-    setState(() {
-      _selectedUnidadesEncomenda = [];
-      _selectedUnidadeEncomenda = null;
-      _tipoEncomendaSelecionado = null;
-      _localEntregaSelecionado = null;
-      _fotoEncomenda = null;
-      _fotoEncomendaEntrega = null;
-      _loadingFotoEncomenda = false;
-      _codigoBarrasEncomendaController.clear();
-      _identificacaoInternaEncomendaController.clear();
-      _observacaoEncomendaController.clear();
-    });
-  }
-
-  /// Gera identificação interna aleatória de 6 dígitos
-  String _gerarIdentificacaoInterna() {
-    final random = Random();
-    return (random.nextInt(900000) + 100000).toString(); // 100000-999999
-  }
-
-  /// Imprime etiqueta via browser print (impressora térmica Zebra)
-  void _imprimirEtiquetaEncomenda({
-    required String identificacaoInterna,
-    required String torre,
-    required String unidade,
-  }) {
-    // Gerar código de barras Code128 em SVG
-    final barcodeSvg = _gerarBarcodeSvg(identificacaoInterna);
-
-    final conteudoHtml = '''
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  @page {
-    margin: 2mm;
-    size: 80mm auto;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: Arial, Helvetica, sans-serif;
-    width: 76mm;
-    padding: 3mm;
-    text-align: center;
-  }
-  .id-interna {
-    font-size: 28px;
-    font-weight: bold;
-    letter-spacing: 4px;
-    margin-bottom: 4px;
-  }
-  .torre-unidade {
-    font-size: 20px;
-    font-weight: bold;
-    margin-bottom: 6px;
-    border-top: 1px solid #000;
-    border-bottom: 1px solid #000;
-    padding: 4px 0;
-  }
-  .barcode-container {
-    margin: 4px auto;
-  }
-  .barcode-container svg {
-    width: 60mm;
-    height: 18mm;
-  }
-  .label-id {
-    font-size: 10px;
-    color: #555;
-    margin-bottom: 2px;
-  }
-</style>
-</head>
-<body>
-  <div class="label-id">IDENTIFICAÇÃO INTERNA</div>
-  <div class="id-interna">$identificacaoInterna</div>
-  <div class="torre-unidade">$torre - $unidade</div>
-  <div class="barcode-container">$barcodeSvg</div>
-</body>
-</html>
-''';
-
-    // Criar Blob URL com o HTML e abrir para impressão
-    final blob = html.Blob([conteudoHtml], 'text/html');
-    final blobUrl = html.Url.createObjectUrlFromBlob(blob);
-
-    final printWindow = html.window.open(blobUrl, '_blank');
-
-    // Aguardar renderização antes de imprimir
-    Future.delayed(const Duration(milliseconds: 500), () {
-      // Usar JS interop via dart:html para chamar print na janela
-      (printWindow as dynamic).print();
-      // Fechar janela e revogar URL após impressão
-      Future.delayed(const Duration(seconds: 2), () {
-        (printWindow as dynamic).close();
-        html.Url.revokeObjectUrl(blobUrl);
-      });
-    });
-  }
-
-  /// Gera SVG de código de barras Code128B
-  String _gerarBarcodeSvg(String texto) {
-    // Code128B encoding
-    const code128B = <String, List<int>>{
-      ' ': [2, 1, 2, 2, 2, 2],
-      '!': [2, 2, 2, 1, 2, 2],
-      '"': [2, 2, 2, 2, 2, 1],
-      '#': [1, 2, 1, 2, 2, 3],
-      '\$': [1, 2, 1, 3, 2, 2],
-      '%': [1, 3, 1, 2, 2, 2],
-      '&': [1, 2, 2, 2, 1, 3],
-      "'": [1, 2, 2, 3, 1, 2],
-      '(': [1, 3, 2, 2, 1, 2],
-      ')': [2, 2, 1, 2, 1, 3],
-      '*': [2, 2, 1, 3, 1, 2],
-      '+': [2, 3, 1, 2, 1, 2],
-      ',': [1, 1, 2, 2, 3, 2],
-      '-': [1, 2, 2, 1, 3, 2],
-      '.': [1, 2, 2, 2, 3, 1],
-      '/': [1, 1, 3, 2, 2, 2],
-      '0': [1, 2, 3, 1, 2, 2],
-      '1': [1, 2, 3, 2, 2, 1],
-      '2': [2, 2, 3, 2, 1, 1],
-      '3': [2, 2, 1, 1, 3, 2],
-      '4': [2, 2, 1, 2, 3, 1],
-      '5': [2, 1, 3, 2, 1, 2],
-      '6': [2, 2, 3, 1, 1, 2],
-      '7': [3, 1, 2, 1, 3, 1],
-      '8': [3, 1, 1, 2, 2, 2],
-      '9': [3, 2, 1, 1, 2, 2],
-      ':': [3, 2, 1, 2, 2, 1],
-      ';': [3, 1, 2, 2, 1, 2],
-      '<': [3, 2, 2, 1, 1, 2],
-      '=': [3, 2, 2, 2, 1, 1],
-      '>': [2, 1, 2, 1, 2, 3],
-      '?': [2, 1, 2, 3, 2, 1],
-      '@': [2, 3, 2, 1, 2, 1],
-      'A': [1, 1, 1, 3, 2, 3],
-      'B': [1, 3, 1, 1, 2, 3],
-      'C': [1, 3, 1, 3, 2, 1],
-      'D': [1, 1, 2, 3, 2, 3],
-      'E': [1, 3, 2, 1, 2, 3],
-      'F': [1, 3, 2, 3, 2, 1],
-      'G': [2, 1, 1, 3, 2, 3],
-      'H': [2, 3, 1, 1, 2, 3],
-      'I': [2, 3, 1, 3, 2, 1],
-      'J': [1, 1, 2, 3, 3, 2],
-      'K': [1, 3, 2, 1, 3, 2],
-      'L': [1, 3, 2, 3, 3, 0],
-      'M': [1, 1, 3, 2, 2, 3],
-      'N': [1, 3, 3, 2, 2, 1],
-      'O': [1, 3, 3, 2, 2, 1],
-      'P': [2, 1, 3, 2, 2, 3],
-      'Q': [2, 3, 3, 2, 2, 1],
-      'R': [2, 1, 2, 3, 3, 2],
-      'S': [3, 3, 1, 1, 2, 2],
-      'T': [3, 3, 1, 2, 2, 1],
-      'U': [3, 3, 2, 1, 1, 2],
-      'V': [3, 3, 2, 2, 1, 1],
-      'W': [3, 1, 3, 1, 2, 2],
-      'X': [3, 2, 3, 1, 2, 1],
-      'Y': [3, 2, 3, 2, 1, 1],
-      'Z': [1, 2, 1, 1, 2, 3],
-    };
-
-    // Abordagem simplificada: gerar barras usando padrão visual
-    // Para números de 6 dígitos, usar Code128B
-    final startCode = [2, 1, 1, 2, 3, 2]; // Start Code B (valor 104)
-    final stopCode = [2, 3, 3, 1, 1, 1, 2]; // Stop
-
-    List<List<int>> patterns = [startCode];
-    int checksum = 104;
-
-    for (int i = 0; i < texto.length; i++) {
-      final char = texto[i];
-      final valor = char.codeUnitAt(0) - 32;
-      final key = char;
-      if (code128B.containsKey(key)) {
-        patterns.add(code128B[key]!);
-      } else {
-        // Fallback para '0'
-        patterns.add(code128B['0']!);
-      }
-      checksum += valor * (i + 1);
-    }
-
-    // Checksum
-    final checksumVal = checksum % 103;
-    // Mapear checksum para padrão (simplificado - usar tabela)
-    final checksumChar =
-        checksumVal + 32 < 127 ? String.fromCharCode(checksumVal + 32) : ' ';
-    if (code128B.containsKey(checksumChar)) {
-      patterns.add(code128B[checksumChar]!);
-    }
-    patterns.add(stopCode);
-
-    // Gerar SVG
-    final buffer = StringBuffer();
-    double x = 0;
-    const barWidth = 1.5;
-
-    for (final pattern in patterns) {
-      bool isBar = true;
-      for (final width in pattern) {
-        if (isBar) {
-          buffer.write(
-              '<rect x="$x" y="0" width="${width * barWidth}" height="60" fill="black"/>');
-        }
-        x += width * barWidth;
-        isBar = !isBar;
-      }
-    }
-
-    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 $x 60" preserveAspectRatio="xMidYMid meet">$buffer</svg>';
-  }
-
-  // Funçao para enviar encomenda usando API do backup
-  Future<void> _registrarEncomenda() async {
-    final prefs = await SharedPreferences.getInstance();
-    final encrypted = prefs.getString('tokensessao_txt');
-    final tokenSessao = (encrypted != null && encrypted.isNotEmpty)
-        ? decryptText(encrypted)
-        : '';
-    final encryptedUsuarioId = prefs.getString('usuario_id') ?? '';
-    final usuarioId =
-        (encryptedUsuarioId.isNotEmpty) ? decryptText(encryptedUsuarioId) : '';
-    final usuariodeId = int.tryParse(usuarioId) ?? 0;
-    final tipoSelecionado = _tipoEncomendaSelecionado != null
-        ? _tipoEncomendaSelecionado!['descricao'] ?? ''
-        : '';
-    final fotoBase64 =
-        _fotoEncomenda != null ? base64Encode(_fotoEncomenda!) : '';
-    final machineIP = await _getMachineIP();
-    final condominioIdRaw = await ApiConfig.getCondominioId();
-    final condominioId = int.tryParse(condominioIdRaw) ?? 0;
-    final identificacaoInterna =
-        _identificacaoInternaEncomendaController.text.trim();
-
-    final url = Uri.parse(ApiConfig.getEndpoint('encomendas', 'registrar'));
-
-    // Enviar para cada unidade selecionada (multiselect)
-    int sucessos = 0;
-    int? lastProtocoloId;
-    Uint8List? fotoParaUpload = _fotoEncomendaEntrega;
-
-    for (final unidade in _selectedUnidadesEncomenda) {
-      final usuarioparaId = unidade['usuario_id']?.toString() ?? '';
-      final payload = {
-        "condominio_id": condominioId,
-        "usuariode_id": usuariodeId,
-        "usuariopara": usuarioparaId,
-        "avisocategoria_id": 21,
-        "sms_flg": "N",
-        "titulo": "Entrega de encomenda",
-        "texto": tipoSelecionado,
-        "local": (_localEntregaSelecionado != null)
-            ? (_localEntregaSelecionado!["descricao"]?.toString() ?? "")
-            : "",
-        "codigobarra": _codigoBarrasEncomendaController.text,
-        "depara_id": identificacaoInterna,
-        "ip": machineIP,
-        "fotobase64": fotoBase64,
-      };
-
-      print('Payload (unidade ${unidade['usuario_id']}): $payload');
-
-      try {
-        final response = await http.post(
-          url,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $tokenSessao',
-          },
-          body: jsonEncode(payload),
-        );
-
-        print('Status Code: ${response.statusCode}');
-        if (response.statusCode == 200) {
-          final responseData = jsonDecode(response.body);
-          int? protocoloId;
-          if (responseData['protocolo'] != null) {
-            protocoloId = int.tryParse(responseData['protocolo'].toString());
-          } else if (responseData['id'] != null) {
-            protocoloId = int.tryParse(responseData['id'].toString());
-          }
-          lastProtocoloId = protocoloId;
-          sucessos++;
-        }
-      } catch (e) {
-        print('Erro ao registrar para unidade ${unidade['usuario_id']}: $e');
-      }
-    } // fim loop unidades
-
-    // Upload da foto (uma vez, após enviar para todas as unidades)
-    if (lastProtocoloId != null && fotoParaUpload != null) {
-      await _uploadFotoEncomenda(lastProtocoloId, fotoParaUpload);
-    }
-
-    if (sucessos > 0) {
-      // Limpar formulário
-      _limparFormularioEncomenda();
-
-      setState(() {
-        _feedbackMessageRegistroEncomenda = sucessos == 1
-            ? 'Encomenda registrada com sucesso!'
-            : '$sucessos encomendas registradas com sucesso!';
-      });
-
-      // Limpar mensagem após 3 segundos
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) {
-          setState(() {
-            _feedbackMessageRegistroEncomenda = '';
-          });
-        }
-      });
-
-      // Recarregar lista de entregas
-      await _fetchEntregas();
-    } else {
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro ao Registrar',
-        message: 'Não foi possível registrar a encomenda.',
-      );
-    }
-  }
-
-  Future<void> _uploadFotoEntregaPessoa(
-      String usuarioId, Uint8List fotoBytes) async {
-    await EncomendaFetchService.uploadFotoPessoa(usuarioId, fotoBytes);
-  }
-
-  Future<void> _uploadFotoEncomenda(
-      int protocoloId, Uint8List fotoBytes) async {
-    await EncomendaFetchService.uploadFotoEncomenda(protocoloId, fotoBytes);
   }
 
   // Obter IP da máquina
@@ -16623,15 +15281,14 @@ String unidadeLabelComMorador(Map<String, dynamic> unidade) {
           '')
       .toString();
 
-  // Formato: "Nome / Número - Torre" (ex: "Alessandro / 11 - Torre A")
   final unidadePart = numero.isNotEmpty && torreFmt.isNotEmpty
-      ? '$numero - $torreFmt'
+      ? '$numero :: $torreFmt'
       : numero.isNotEmpty
           ? numero
           : torreFmt;
 
   if (nome.isNotEmpty && unidadePart.isNotEmpty) {
-    return '$nome / $unidadePart';
+    return '$unidadePart ::  $nome ';
   }
   if (nome.isNotEmpty) return nome;
   if (unidadePart.isNotEmpty) return unidadePart;
@@ -16723,7 +15380,3 @@ int? _convertToValidId(dynamic value) {
 
   return (id != null && id > 0) ? id : null;
 }
-
-// Widget do painel lateral para resultados da busca de entradas
-
-// Painel lateral para exibir detalhes da encomenda entregue

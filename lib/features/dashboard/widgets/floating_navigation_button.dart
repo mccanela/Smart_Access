@@ -13,9 +13,12 @@ class FloatingNavigationButton extends StatelessWidget {
   });
 
   static const List<Color> _pageColors = [
-    Color(0xFF7C4DFF), // Página 1: Entrada/Passagens
-    Color(0xFF4CAF50), // Página 2: Unidades
-    Color(0xFF00BFA5), // Página 3: ConectCon IA
+    Color(0xFF4CAF50), // Página 2: Avulsas
+
+    Color(0xFF2196F3), // Página 1: passagens
+    Color(0xFF7C4DFF), // Unidades
+
+    Color.fromARGB(204, 234, 177, 7), // Página 3: ConectCon IA
   ];
 
   @override
@@ -56,9 +59,8 @@ class FloatingNavigationButton extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: Tooltip(
-            message: isTabletLayout
-                ? 'Alternar entre páginas'
-                : 'Layout responsivo',
+            message:
+                isTabletLayout ? 'Alternar entre páginas' : 'Layout responsivo',
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
               onTap: isTabletLayout ? onTogglePage : null,
@@ -75,25 +77,6 @@ class FloatingNavigationButton extends StatelessWidget {
                       isTabletLayout ? Icons.arrow_forward : Icons.settings,
                       color: Colors.white,
                       size: 28,
-                    ),
-                    Positioned(
-                      bottom: 8,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: List.generate(totalPages, (index) {
-                          return AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(
-                                  alpha: index == currentPage ? 0.9 : 0.4),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                          );
-                        }),
-                      ),
                     ),
                   ],
                 ),

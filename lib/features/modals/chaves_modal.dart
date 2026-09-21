@@ -281,6 +281,7 @@ class _ChavesModalState extends State<ChavesModal> {
   bool _loadingHistorico = false;
   DateTime? _dataInicioDevolvidos;
   DateTime? _dataFimDevolvidos;
+  int _quantidadeDevolver = 0; // 👇 ADICIONE ESTA LINHA
 
   // Dados
   List<Map<String, dynamic>> _chavesDisponiveis = [];
@@ -436,6 +437,10 @@ class _ChavesModalState extends State<ChavesModal> {
         final data = jsonDecode(response.body);
         setState(() {
           _historico = List<Map<String, dynamic>>.from(data['data'] ?? []);
+          // 👇 ADICIONE ESTA VALIDAÇÃO AQUI
+          if (statusId == 3 || statusId == null) {
+            _quantidadeDevolver = _historico.length;
+          }
         });
       } else {
         print('Erro ao carregar histórico: ${response.statusCode}');
@@ -740,6 +745,9 @@ class _ChavesModalState extends State<ChavesModal> {
 
   @override
   Widget build(BuildContext context) {
+    // ADICIONADO: Detectar se é uma tela de celular
+    final isMobile = MediaQuery.of(context).size.width < 800;
+
     return Container(
       decoration: BoxDecoration(
         color: getBackgroundColor(context),
@@ -760,17 +768,32 @@ class _ChavesModalState extends State<ChavesModal> {
             onClose: widget.onClose,
           ),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: _buildNovaChavePanel()),
-                  const SizedBox(width: 24),
-                  Expanded(child: _buildHistoricoPanel()),
-                ],
-              ),
-            ),
+            child: isMobile
+                // 📱 NO MOBILE: Usa Scroll e remove os Expanded
+                ? SingleChildScrollView(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildNovaChavePanel(), // Sem Expanded
+                        const SizedBox(height: 16),
+                        _buildHistoricoPanel(
+                            isMobile: true), // Sem Expanded e passa flag
+                      ],
+                    ),
+                  )
+                // 💻 NO DESKTOP: Mantém lado a lado e com Expanded
+                : Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: _buildNovaChavePanel()),
+                        const SizedBox(width: 24),
+                        Expanded(child: _buildHistoricoPanel(isMobile: false)),
+                      ],
+                    ),
+                  ),
           ),
         ],
       ),
@@ -1004,24 +1027,28 @@ class _ChavesModalState extends State<ChavesModal> {
           const SizedBox(height: 24),
           Align(
             alignment: Alignment.centerRight,
-            child: _buildTransparentIconGroup(
-              context,
-              [
-                {
-                  'icon': Symbols.ink_eraser,
-                  'color': IconColors.delete(context),
-                  'tooltip': 'Limpar formulário',
-                  'onPressed': _limparFormulario,
-                },
-                {
-                  'key': _registrarChaveKey,
-                  'icon': Symbols.send,
-                  'color': Colors.green,
-                  'tooltip': 'Registrar entrega',
-                  'onPressed': _registrarEntrega,
-                  'isLoading': _loading,
-                },
-              ],
+            // ADICIONADO: Scroll horizontal para proteger os botões no mobile
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: _buildTransparentIconGroup(
+                context,
+                [
+                  {
+                    'icon': Symbols.ink_eraser,
+                    'color': IconColors.delete(context),
+                    'tooltip': 'Limpar formulário',
+                    'onPressed': _limparFormulario,
+                  },
+                  {
+                    'key': _registrarChaveKey,
+                    'icon': Symbols.send,
+                    'color': Colors.green,
+                    'tooltip': 'Registrar entrega',
+                    'onPressed': _registrarEntrega,
+                    'isLoading': _loading,
+                  },
+                ],
+              ),
             ),
           ),
           InlineFeedbackWidget(
@@ -1033,7 +1060,8 @@ class _ChavesModalState extends State<ChavesModal> {
     );
   }
 
-  Widget _buildHistoricoPanel() {
+// Modificado para aceitar o parâmetro isMobile
+  Widget _buildHistoricoPanel({bool isMobile = false}) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1043,8 +1071,9 @@ class _ChavesModalState extends State<ChavesModal> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        // No mobile, a Column não pode ter tamanho ilimitado
+        mainAxisSize: isMobile ? MainAxisSize.min : MainAxisSize.max,
         children: [
-          // Título da seção histórico
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Row(
@@ -1089,15 +1118,44 @@ class _ChavesModalState extends State<ChavesModal> {
                             : null,
                       ),
                       alignment: Alignment.center,
-                      child: Text(
-                        'Devolver',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: _selectedTab == 'devolver'
-                              ? Colors.white
-                              : const Color(0xFF6B7280),
-                        ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Devolver',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: _selectedTab == 'devolver'
+                                  ? Colors.white
+                                  : const Color(0xFF6B7280),
+                            ),
+                          ),
+                          // SÓ MOSTRA O BADGE SE TIVER MAIS DE 0
+                          if (_quantidadeDevolver > 0) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: _selectedTab == 'devolver'
+                                    ? Colors.white
+                                    : const Color(0xFF684F8E).withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '$_quantidadeDevolver',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: _selectedTab == 'devolver'
+                                      ? const Color(0xFF684F8E)
+                                      : const Color(0xFF684F8E),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ),
@@ -1142,7 +1200,6 @@ class _ChavesModalState extends State<ChavesModal> {
             ),
           ),
           const SizedBox(height: 24),
-          // Filtros de período para Devolvidos
           if (_selectedTab == 'devolvidos') ...[
             InlinePeriodPicker(
               startDate: _dataInicioDevolvidos,
@@ -1158,719 +1215,590 @@ class _ChavesModalState extends State<ChavesModal> {
                 });
                 _carregarHistoricoDevolvidos();
               },
-              trailing: _buildTransparentIconGroup(
-                context,
-                [
-                  {
-                    'icon': Icons.search,
-                    'color': IconColors.search(context),
-                    'tooltip': 'Buscar',
-                    'onPressed': () {
-                      _carregarHistoricoDevolvidos();
-                    },
-                  },
-                  {
-                    'icon': Symbols.ink_eraser,
-                    'color': IconColors.delete(context),
-                    'tooltip': 'Limpar filtros',
-                    'onPressed': () {
-                      setState(() {
-                        _dataInicioDevolvidos = null;
-                        _dataFimDevolvidos = null;
-                      });
-                      _carregarHistoricoDevolvidos();
-                    },
-                  },
-                ],
-              ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment:
+                  MainAxisAlignment.end, // Alinha os botões à direita
+              children: [
+                _buildTransparentIconGroup(
+                  context,
+                  [
+                    {
+                      'icon': Icons.search,
+                      'color': IconColors.search(context),
+                      'tooltip': 'Buscar',
+                      'onPressed': () {
+                        _carregarHistoricoDevolvidos();
+                      },
+                    },
+                    {
+                      'icon': Symbols.ink_eraser,
+                      'color': IconColors.delete(context),
+                      'tooltip': 'Limpar filtros',
+                      'onPressed': () {
+                        setState(() {
+                          _dataInicioDevolvidos = null;
+                          _dataFimDevolvidos = null;
+                        });
+                        _carregarHistoricoDevolvidos();
+                      },
+                    },
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
           ],
-          Expanded(
-            child: _loadingHistorico
-                ? const Center(child: CircularProgressIndicator())
+          // LÓGICA DA LISTA RESPONSIVA:
+          if (isMobile)
+            _loadingHistorico
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: CircularProgressIndicator()))
                 : _historico.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.key_off,
-                                size: 48,
-                                color: getSecondaryTextColor(context)),
-                            const SizedBox(height: 8),
-                            Text('Sem registros de chaves',
-                                style: TextStyle(
-                                    color: getSecondaryTextColor(context),
-                                    fontSize: 14)),
-                          ],
-                        ),
-                      )
+                    ? _buildEmptyState()
                     : ListView.builder(
+                        shrinkWrap: true, // Importante no mobile
+                        physics:
+                            const NeverScrollableScrollPhysics(), // Scroll do pai
                         itemCount: _historico.length,
-                        itemBuilder: (context, index) {
-                          final item = _historico[index];
-
-                          if (_selectedTab == 'devolver') {
-                            // Novo layout para "Devolver" conforme solicitado
-                            // Extrair dados do campo "retirado_por" que contém nome + unidade + data + hora
-                            final retiradoPor = item['retirado_por'] ?? '';
-                            final partes = retiradoPor.split(' - ');
-                            final nomeUnidade =
-                                partes.length > 0 ? partes[0] : '';
-                            final dataHora = partes.length > 1 ? partes[1] : '';
-
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: getCardColor(context),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: getBorderColor(context), width: 1),
-                              ),
-                              child: Column(
-                                children: [
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            // Primeira linha: Data e hora (Topo)
-                                            Text(
-                                              dataHora.isNotEmpty
-                                                  ? dataHora
-                                                  : (item['dt_retirada'] ??
-                                                      'Data não informada'),
-                                              style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: getSecondaryTextColor(
-                                                      context),
-                                                  fontWeight: FontWeight.w500),
-                                            ),
-                                            const SizedBox(height: 6),
-                                            // Segunda linha: Nome da chave (Meio - Bold)
-                                            Text(
-                                              item['chave_ds'] ??
-                                                  item['chave'] ??
-                                                  'Chave não informada',
-                                              style: TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                                color: getTextColor(context),
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            // Terceira linha: Nome pessoa + unidade (Baixo)
-                                            Text(
-                                              nomeUnidade,
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: getSecondaryTextColor(
-                                                    context),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      // Botão de check lateral (circular)
-                                      InkWell(
-                                        onTap: () => _iniciarDevolucao(item),
-                                        borderRadius: BorderRadius.circular(24),
-                                        child: Container(
-                                          width: 44,
-                                          height: 44,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                              color: Colors.grey.shade300,
-                                              width: 1,
-                                            ),
-                                            color: _expandedReservaId ==
-                                                    item['reserva_id']
-                                                ? Colors.grey.shade100
-                                                : Colors.transparent,
-                                          ),
-                                          child: Icon(
-                                            _expandedReservaId ==
-                                                    item['reserva_id']
-                                                ? Icons.keyboard_arrow_up
-                                                : Icons.check,
-                                            color: Colors.black,
-                                            size: 20,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  // Área expandida
-                                  if (_expandedReservaId ==
-                                      item['reserva_id']) ...[
-                                    Container(
-                                      margin: const EdgeInsets.only(top: 16),
-                                      padding: const EdgeInsets.only(top: 16),
-                                      decoration: BoxDecoration(
-                                        border: Border(
-                                            top: BorderSide(
-                                                color: Colors.grey.shade200)),
-                                      ),
-                                      child: _isDevolucaoOutraPessoa
-                                          ? Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  'Selecione o morador que está devolvendo:',
-                                                  style: TextStyle(
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                      color: getTextColor(
-                                                          context)),
-                                                ),
-                                                const SizedBox(height: 12),
-                                                LayoutBuilder(builder:
-                                                    (context, constraints) {
-                                                  return Autocomplete<
-                                                      Map<String, dynamic>>(
-                                                    initialValue:
-                                                        TextEditingValue(
-                                                      text: _pessoaOutraDevolucao !=
-                                                              null
-                                                          ? (_pessoaOutraDevolucao![
-                                                                  'unidade_mostra'] ??
-                                                              '')
-                                                          : '',
-                                                    ),
-                                                    optionsBuilder:
-                                                        (TextEditingValue
-                                                            textEditingValue) {
-                                                      if (textEditingValue
-                                                          .text.isEmpty) {
-                                                        return _unidades;
-                                                      }
-                                                      return _unidades.where(
-                                                          (Map<String, dynamic>
-                                                              option) {
-                                                        return (option[
-                                                                    'unidade_mostra'] ??
-                                                                '')
-                                                            .toString()
-                                                            .toLowerCase()
-                                                            .contains(
-                                                                textEditingValue
-                                                                    .text
-                                                                    .toLowerCase());
-                                                      });
-                                                    },
-                                                    displayStringForOption: (Map<
-                                                                String, dynamic>
-                                                            option) =>
-                                                        (option['unidade_mostra'] ??
-                                                                '')
-                                                            .toString(),
-                                                    onSelected:
-                                                        (Map<String, dynamic>
-                                                            value) {
-                                                      setState(() {
-                                                        _pessoaOutraDevolucao =
-                                                            value;
-                                                      });
-                                                    },
-                                                    fieldViewBuilder: (context,
-                                                        textEditingController,
-                                                        focusNode,
-                                                        onFieldSubmitted) {
-                                                      return CharacterCounterField(
-                                                        controller:
-                                                            textEditingController,
-                                                        focusNode: focusNode,
-                                                        maxLength: 50,
-                                                        decoration:
-                                                            InputDecoration(
-                                                          labelText:
-                                                              'Buscar morador',
-                                                          filled: true,
-                                                          fillColor:
-                                                              getCardColor(
-                                                                  context),
-                                                          isDense: true,
-                                                          contentPadding:
-                                                              const EdgeInsets
-                                                                  .symmetric(
-                                                                  horizontal:
-                                                                      16,
-                                                                  vertical: 12),
-                                                          border:
-                                                              OutlineInputBorder(
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        8),
-                                                            borderSide: BorderSide(
-                                                                color:
-                                                                    getBorderColor(
-                                                                        context)),
-                                                          ),
-                                                          enabledBorder:
-                                                              OutlineInputBorder(
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        8),
-                                                            borderSide: BorderSide(
-                                                                color:
-                                                                    getBorderColor(
-                                                                        context)),
-                                                          ),
-                                                          focusedBorder:
-                                                              OutlineInputBorder(
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        8),
-                                                            borderSide:
-                                                                const BorderSide(
-                                                                    color: Color(
-                                                                        0xFF684F8E)),
-                                                          ),
-                                                          suffixIcon:
-                                                              textEditingController
-                                                                      .text
-                                                                      .isNotEmpty
-                                                                  ? IconButton(
-                                                                      icon: Icon(
-                                                                          Icons
-                                                                              .close,
-                                                                          size:
-                                                                              20,
-                                                                          color:
-                                                                              getSecondaryTextColor(context)),
-                                                                      onPressed:
-                                                                          () {
-                                                                        textEditingController
-                                                                            .clear();
-                                                                        setState(
-                                                                            () {
-                                                                          _pessoaOutraDevolucao =
-                                                                              null;
-                                                                        });
-                                                                      },
-                                                                    )
-                                                                  : null,
-                                                        ),
-                                                      );
-                                                    },
-                                                    optionsViewBuilder:
-                                                        (context, onSelected,
-                                                            options) {
-                                                      return Align(
-                                                        alignment:
-                                                            Alignment.topLeft,
-                                                        child: Material(
-                                                          elevation: 4,
-                                                          borderRadius:
-                                                              BorderRadius
-                                                                  .circular(8),
-                                                          color: getCardColor(
-                                                              context),
-                                                          child: ConstrainedBox(
-                                                            constraints:
-                                                                BoxConstraints(
-                                                              maxHeight: 200,
-                                                              maxWidth:
-                                                                  constraints
-                                                                      .maxWidth,
-                                                            ),
-                                                            child: ListView
-                                                                .builder(
-                                                              padding:
-                                                                  EdgeInsets
-                                                                      .zero,
-                                                              shrinkWrap: true,
-                                                              itemCount: options
-                                                                  .length,
-                                                              itemBuilder:
-                                                                  (BuildContext
-                                                                          context,
-                                                                      int index) {
-                                                                final Map<
-                                                                        String,
-                                                                        dynamic>
-                                                                    option =
-                                                                    options.elementAt(
-                                                                        index);
-                                                                return InkWell(
-                                                                  onTap: () =>
-                                                                      onSelected(
-                                                                          option),
-                                                                  child:
-                                                                      Container(
-                                                                    padding:
-                                                                        const EdgeInsets
-                                                                            .all(
-                                                                            16.0),
-                                                                    decoration:
-                                                                        BoxDecoration(
-                                                                      border:
-                                                                          Border(
-                                                                        bottom:
-                                                                            BorderSide(
-                                                                          color:
-                                                                              getBorderColor(context).withValues(alpha: 0.5),
-                                                                          width:
-                                                                              0.5,
-                                                                        ),
-                                                                      ),
-                                                                    ),
-                                                                    child: Text(
-                                                                      (option['unidade_mostra'] ??
-                                                                              'Sem unidade')
-                                                                          .toString(),
-                                                                      style: TextStyle(
-                                                                          color:
-                                                                              getTextColor(context)),
-                                                                    ),
-                                                                  ),
-                                                                );
-                                                              },
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      );
-                                                    },
-                                                  );
-                                                }),
-                                                const SizedBox(height: 16),
-                                                Align(
-                                                  alignment:
-                                                      Alignment.centerRight,
-                                                  child: Container(
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.transparent,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              40),
-                                                      border: Border.all(
-                                                          color: Colors
-                                                              .grey.shade300,
-                                                          width: 1),
-                                                    ),
-                                                    child: Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        InkWell(
-                                                          onTap: () {
-                                                            setState(() {
-                                                              _isDevolucaoOutraPessoa =
-                                                                  false;
-                                                              _pessoaOutraDevolucao =
-                                                                  null;
-                                                            });
-                                                          },
-                                                          borderRadius: BorderRadius
-                                                              .horizontal(
-                                                                  left: const Radius
-                                                                      .circular(
-                                                                      40)),
-                                                          child: Padding(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .symmetric(
-                                                                    horizontal:
-                                                                        16,
-                                                                    vertical:
-                                                                        8),
-                                                            child: Text(
-                                                              'Cancelar',
-                                                              style: TextStyle(
-                                                                  color: getTextColor(
-                                                                      context)),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        Container(
-                                                          width: 1,
-                                                          height: 24,
-                                                          color: Colors
-                                                              .grey.shade300,
-                                                        ),
-                                                        InkWell(
-                                                          onTap: () {
-                                                            if (_pessoaOutraDevolucao ==
-                                                                null) {
-                                                              FeedbackUtils
-                                                                  .showError(
-                                                                context:
-                                                                    context,
-                                                                title:
-                                                                    'Atenção',
-                                                                message:
-                                                                    'Selecione um morador.',
-                                                              );
-                                                            } else {
-                                                              _executarDevolucao(
-                                                                _reservaEmProcesso![
-                                                                    'reservaId'],
-                                                                _pessoaOutraDevolucao![
-                                                                    'usuario_id'],
-                                                                _reservaEmProcesso![
-                                                                    'convidadoTxt'],
-                                                              );
-                                                            }
-                                                          },
-                                                          borderRadius: BorderRadius
-                                                              .horizontal(
-                                                                  right: const Radius
-                                                                      .circular(
-                                                                      40)),
-                                                          child: Padding(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .symmetric(
-                                                                    horizontal:
-                                                                        16,
-                                                                    vertical:
-                                                                        8),
-                                                            child: const Text(
-                                                              'Devolver',
-                                                              style: TextStyle(
-                                                                  color: Color(
-                                                                      0xFF684F8E),
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w600),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            )
-                                          : Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  'Esta chave está sendo devolvida por outra pessoa?',
-                                                  style: TextStyle(
-                                                      fontSize: 14,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      color: getTextColor(
-                                                          context)),
-                                                ),
-                                                const SizedBox(height: 16),
-                                                Align(
-                                                  alignment:
-                                                      Alignment.centerRight,
-                                                  child: Container(
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.transparent,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              40),
-                                                      border: Border.all(
-                                                          color: Colors
-                                                              .grey.shade300,
-                                                          width: 1),
-                                                    ),
-                                                    child: Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        InkWell(
-                                                          onTap: () {
-                                                            // Não é outra pessoa, devolver com o ID original
-                                                            _executarDevolucao(
-                                                              _reservaEmProcesso![
-                                                                  'reservaId'],
-                                                              _reservaEmProcesso![
-                                                                  'retiradoPorId'],
-                                                              _reservaEmProcesso![
-                                                                  'convidadoTxt'],
-                                                            );
-                                                          },
-                                                          borderRadius: BorderRadius
-                                                              .horizontal(
-                                                                  left: const Radius
-                                                                      .circular(
-                                                                      40)),
-                                                          child: Padding(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .symmetric(
-                                                                    horizontal:
-                                                                        16,
-                                                                    vertical:
-                                                                        8),
-                                                            child: Text(
-                                                              'Não',
-                                                              style: TextStyle(
-                                                                  color: getTextColor(
-                                                                      context)),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        Container(
-                                                          width: 1,
-                                                          height: 24,
-                                                          color: Colors
-                                                              .grey.shade300,
-                                                        ),
-                                                        InkWell(
-                                                          onTap: () {
-                                                            setState(() {
-                                                              _isDevolucaoOutraPessoa =
-                                                                  true;
-                                                            });
-                                                          },
-                                                          borderRadius: BorderRadius
-                                                              .horizontal(
-                                                                  right: const Radius
-                                                                      .circular(
-                                                                      40)),
-                                                          child: Padding(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .symmetric(
-                                                                    horizontal:
-                                                                        16,
-                                                                    vertical:
-                                                                        8),
-                                                            child: const Text(
-                                                              'Sim',
-                                                              style: TextStyle(
-                                                                  color: Color(
-                                                                      0xFF684F8E),
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w600),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            );
-                          } else {
-                            // Layout histórico para "Devolvidos" (itens já devolvidos)
-                            final retiradoPor = item['retirado_por'] ?? '';
-                            final partes = retiradoPor.split(' - ');
-                            final nomeUnidade =
-                                partes.length > 0 ? partes[0] : '';
-                            final dataHora = partes.length > 1 ? partes[1] : '';
-
-                            // Extrair informações de quem devolveu
-                            final devolvidoPor = item['devolvido_por'] ?? '';
-                            String devolveuNome = 'Não informado';
-                            String devolveuDataHora = '';
-
-                            if (devolvidoPor.isNotEmpty) {
-                              // Formato esperado: "11 / Torre A - Alessandro Fernandes às 29/10/2025 14:02:00"
-                              final partes = devolvidoPor.split(' - ');
-                              if (partes.length >= 2) {
-                                // Ignorando devolveuUnidade pois não é usada
-                                final nomeEData = partes[1].split(' às ');
-                                if (nomeEData.length >= 2) {
-                                  devolveuNome = nomeEData[0]
-                                      .trim(); // "Alessandro Fernandes"
-                                  devolveuDataHora = nomeEData[1]
-                                      .trim(); // "29/10/2025 14:02:00"
-                                }
-                              }
-                            }
-
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: getCardColor(context),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? Colors.grey.shade700
-                                        : const Color(0xFFD1D5DB),
-                                    width: 1),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Primeira linha: Nome da chave (Topo - Bold)
-                                  Text(
-                                    item['chave_ds'] ??
-                                        item['chave'] ??
-                                        'Chave não informada',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: getTextColor(context),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  // Segunda linha: Quem pegou e quem devolveu
-                                  Text(
-                                    'Pegou: $nomeUnidade',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: getSecondaryTextColor(context),
-                                    ),
-                                  ),
-                                  if (devolveuNome != 'Não informado') ...[
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Devolveu: $devolveuNome',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: getSecondaryTextColor(context),
-                                      ),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 8),
-                                  // Terceira linha: Datas (Ret e Dev)
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Ret: ${dataHora.isNotEmpty ? dataHora : (item['dt_retirada'] ?? '-')}',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        color: getSecondaryTextColor(context),
-                                        fontWeight: FontWeight.w500),
-                                  ),
-                                  if (devolveuDataHora.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Dev: $devolveuDataHora',
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          color: getSecondaryTextColor(context),
-                                          fontWeight: FontWeight.w500),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            );
-                          }
-                        },
-                      ),
-          ),
+                        itemBuilder: _buildHistoricoItem,
+                      )
+          else
+            Expanded(
+              child: _loadingHistorico
+                  ? const Center(child: CircularProgressIndicator())
+                  : _historico.isEmpty
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          itemCount: _historico.length,
+                          itemBuilder: _buildHistoricoItem,
+                        ),
+            ),
         ],
       ),
     );
+  }
+
+  // Método auxiliar extraído para não repetir código do estado vazio
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.key_off, size: 48, color: getSecondaryTextColor(context)),
+          const SizedBox(height: 8),
+          Text('Sem registros de chaves',
+              style: TextStyle(
+                  color: getSecondaryTextColor(context), fontSize: 14)),
+        ],
+      ),
+    );
+  }
+
+  // Método auxiliar extraído para construir o item da lista
+  Widget _buildHistoricoItem(BuildContext context, int index) {
+    final item = _historico[index];
+
+    if (_selectedTab == 'devolver') {
+      final retiradoPor = item['retirado_por'] ?? '';
+      final partes = retiradoPor.split(' - ');
+      final nomeUnidade = partes.length > 0 ? partes[0] : '';
+      final dataHora = partes.length > 1 ? partes[1] : '';
+      final observacao = (item['obs'] ?? '').toString();
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: getCardColor(context),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: getBorderColor(context), width: 1),
+        ),
+        child: Column(
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        dataHora.isNotEmpty
+                            ? dataHora
+                            : (item['dt_retirada'] ?? 'Data não informada'),
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: getSecondaryTextColor(context),
+                            fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        item['chave_ds'] ??
+                            item['chave'] ??
+                            'Chave não informada',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: getTextColor(context),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        nomeUnidade,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: getSecondaryTextColor(context),
+                        ),
+                      ),
+                      // 👇 ADICIONE O TEXTO DA OBSERVAÇÃO AQUI
+                      if (observacao.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Obs: $observacao',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: getSecondaryTextColor(context),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () => _iniciarDevolucao(item),
+                  borderRadius: BorderRadius.circular(24),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.grey.shade300,
+                        width: 1,
+                      ),
+                      color: _expandedReservaId == item['reserva_id']
+                          ? Colors.grey.shade100
+                          : Colors.transparent,
+                    ),
+                    child: Icon(
+                      _expandedReservaId == item['reserva_id']
+                          ? Icons.keyboard_arrow_up
+                          : Icons.check,
+                      color: Colors.black,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (_expandedReservaId == item['reserva_id']) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 16),
+                padding: const EdgeInsets.only(top: 16),
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: Colors.grey.shade200)),
+                ),
+                child: _isDevolucaoOutraPessoa
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Selecione o morador que está devolvendo:',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: getTextColor(context)),
+                          ),
+                          const SizedBox(height: 12),
+                          LayoutBuilder(builder: (context, constraints) {
+                            return Autocomplete<Map<String, dynamic>>(
+                              initialValue: TextEditingValue(
+                                text: _pessoaOutraDevolucao != null
+                                    ? (_pessoaOutraDevolucao![
+                                            'unidade_mostra'] ??
+                                        '')
+                                    : '',
+                              ),
+                              optionsBuilder:
+                                  (TextEditingValue textEditingValue) {
+                                if (textEditingValue.text.isEmpty) {
+                                  return _unidades;
+                                }
+                                return _unidades
+                                    .where((Map<String, dynamic> option) {
+                                  return (option['unidade_mostra'] ?? '')
+                                      .toString()
+                                      .toLowerCase()
+                                      .contains(
+                                          textEditingValue.text.toLowerCase());
+                                });
+                              },
+                              displayStringForOption:
+                                  (Map<String, dynamic> option) =>
+                                      (option['unidade_mostra'] ?? '')
+                                          .toString(),
+                              onSelected: (Map<String, dynamic> value) {
+                                setState(() {
+                                  _pessoaOutraDevolucao = value;
+                                });
+                              },
+                              fieldViewBuilder: (context, textEditingController,
+                                  focusNode, onFieldSubmitted) {
+                                return CharacterCounterField(
+                                  controller: textEditingController,
+                                  focusNode: focusNode,
+                                  maxLength: 50,
+                                  decoration: InputDecoration(
+                                    labelText: 'Buscar morador',
+                                    filled: true,
+                                    fillColor: getCardColor(context),
+                                    isDense: true,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 12),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                          color: getBorderColor(context)),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                          color: getBorderColor(context)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: const BorderSide(
+                                          color: Color(0xFF684F8E)),
+                                    ),
+                                    suffixIcon: textEditingController
+                                            .text.isNotEmpty
+                                        ? IconButton(
+                                            icon: Icon(Icons.close,
+                                                size: 20,
+                                                color: getSecondaryTextColor(
+                                                    context)),
+                                            onPressed: () {
+                                              textEditingController.clear();
+                                              setState(() {
+                                                _pessoaOutraDevolucao = null;
+                                              });
+                                            },
+                                          )
+                                        : null,
+                                  ),
+                                );
+                              },
+                              optionsViewBuilder:
+                                  (context, onSelected, options) {
+                                return Align(
+                                  alignment: Alignment.topLeft,
+                                  child: Material(
+                                    elevation: 4,
+                                    borderRadius: BorderRadius.circular(8),
+                                    color: getCardColor(context),
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        maxHeight: 200,
+                                        maxWidth: constraints.maxWidth,
+                                      ),
+                                      child: ListView.builder(
+                                        padding: EdgeInsets.zero,
+                                        shrinkWrap: true,
+                                        itemCount: options.length,
+                                        itemBuilder:
+                                            (BuildContext context, int index) {
+                                          final Map<String, dynamic> option =
+                                              options.elementAt(index);
+                                          return InkWell(
+                                            onTap: () => onSelected(option),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.all(16.0),
+                                              decoration: BoxDecoration(
+                                                border: Border(
+                                                  bottom: BorderSide(
+                                                    color:
+                                                        getBorderColor(context)
+                                                            .withValues(
+                                                                alpha: 0.5),
+                                                    width: 0.5,
+                                                  ),
+                                                ),
+                                              ),
+                                              child: Text(
+                                                (option['unidade_mostra'] ??
+                                                        'Sem unidade')
+                                                    .toString(),
+                                                style: TextStyle(
+                                                    color:
+                                                        getTextColor(context)),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          }),
+                          const SizedBox(height: 16),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.transparent,
+                                  borderRadius: BorderRadius.circular(40),
+                                  border: Border.all(
+                                      color: Colors.grey.shade300, width: 1),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _isDevolucaoOutraPessoa = false;
+                                          _pessoaOutraDevolucao = null;
+                                        });
+                                      },
+                                      borderRadius:
+                                          const BorderRadius.horizontal(
+                                              left: Radius.circular(40)),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 8),
+                                        child: Text('Cancelar',
+                                            style: TextStyle(
+                                                color: getTextColor(context))),
+                                      ),
+                                    ),
+                                    Container(
+                                        width: 1,
+                                        height: 24,
+                                        color: Colors.grey.shade300),
+                                    InkWell(
+                                      onTap: () {
+                                        if (_pessoaOutraDevolucao == null) {
+                                          FeedbackUtils.showError(
+                                            context: context,
+                                            title: 'Atenção',
+                                            message: 'Selecione um morador.',
+                                          );
+                                        } else {
+                                          _executarDevolucao(
+                                            _reservaEmProcesso!['reservaId'],
+                                            _pessoaOutraDevolucao![
+                                                'usuario_id'],
+                                            _reservaEmProcesso!['convidadoTxt'],
+                                          );
+                                        }
+                                      },
+                                      borderRadius:
+                                          const BorderRadius.horizontal(
+                                              right: Radius.circular(40)),
+                                      child: const Padding(
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 8),
+                                        child: Text(
+                                          'Devolver',
+                                          style: TextStyle(
+                                              color: Color(0xFF684F8E),
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Esta chave está sendo devolvida por outra pessoa?',
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: getTextColor(context)),
+                          ),
+                          const SizedBox(height: 16),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.transparent,
+                                  borderRadius: BorderRadius.circular(40),
+                                  border: Border.all(
+                                      color: Colors.grey.shade300, width: 1),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    InkWell(
+                                      onTap: () {
+                                        _executarDevolucao(
+                                          _reservaEmProcesso!['reservaId'],
+                                          _reservaEmProcesso!['retiradoPorId'],
+                                          _reservaEmProcesso!['convidadoTxt'],
+                                        );
+                                      },
+                                      borderRadius:
+                                          const BorderRadius.horizontal(
+                                              left: Radius.circular(40)),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 8),
+                                        child: Text('Não',
+                                            style: TextStyle(
+                                                color: getTextColor(context))),
+                                      ),
+                                    ),
+                                    Container(
+                                        width: 1,
+                                        height: 24,
+                                        color: Colors.grey.shade300),
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _isDevolucaoOutraPessoa = true;
+                                        });
+                                      },
+                                      borderRadius:
+                                          const BorderRadius.horizontal(
+                                              right: Radius.circular(40)),
+                                      child: const Padding(
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 8),
+                                        child: Text(
+                                          'Sim',
+                                          style: TextStyle(
+                                              color: Color(0xFF684F8E),
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ],
+          ],
+        ),
+      );
+    } else {
+      // Layout histórico para "Devolvidos"
+      final retiradoPor = item['retirado_por'] ?? '';
+      final partes = retiradoPor.split(' - ');
+      final nomeUnidade = partes.length > 0 ? partes[0] : '';
+      final dataHora = partes.length > 1 ? partes[1] : '';
+
+      final devolvidoPor = item['devolvido_por'] ?? '';
+      String devolveuNome = 'Não informado';
+      String devolveuDataHora = '';
+
+// 👇 1. ADICIONE A LEITURA DA OBSERVAÇÃO AQUI
+      final observacao = (item['obs'] ?? '').toString();
+
+      if (devolvidoPor.isNotEmpty) {
+        final partes = devolvidoPor.split(' - ');
+        if (partes.length >= 2) {
+          final nomeEData = partes[1].split(' às ');
+          if (nomeEData.length >= 2) {
+            devolveuNome = nomeEData[0].trim();
+            devolveuDataHora = nomeEData[1].trim();
+          }
+        }
+      }
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: getCardColor(context),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.grey.shade700
+                  : const Color(0xFFD1D5DB),
+              width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              item['chave_ds'] ?? item['chave'] ?? 'Chave não informada',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: getTextColor(context),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Pegou: $nomeUnidade',
+              style: TextStyle(
+                  fontSize: 12, color: getSecondaryTextColor(context)),
+            ),
+            if (devolveuNome != 'Não informado') ...[
+              const SizedBox(height: 2),
+              Text(
+                'Devolveu: $devolveuNome',
+                style: TextStyle(
+                    fontSize: 12, color: getSecondaryTextColor(context)),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Text(
+              'Ret: ${dataHora.isNotEmpty ? dataHora : (item['dt_retirada'] ?? '-')}',
+              style: TextStyle(
+                  fontSize: 11,
+                  color: getSecondaryTextColor(context),
+                  fontWeight: FontWeight.w500),
+            ),
+            if (devolveuDataHora.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Dev: $devolveuDataHora',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: getSecondaryTextColor(context),
+                    fontWeight: FontWeight.w500),
+              ),
+            ],
+            // 👇 2. ADICIONE A EXIBIÇÃO DA OBSERVAÇÃO AQUI NO FINAL
+            if (observacao.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Obs: $observacao',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                  color: getSecondaryTextColor(context),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
   }
 
   Widget _buildPeriodFilter({

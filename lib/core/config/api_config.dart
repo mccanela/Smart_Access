@@ -106,9 +106,13 @@ class ApiConfig {
       'unidade': {
         'foto': '$socialhUrl/unidadefoto',
         'fotolistar': '$gateUrl/FotoListar',
+        'UsuarioLog': '$socialhUrl/UsuarioLog'
       },
       'listas': {
         'listas': '$gateUrl/listas?pai=98',
+      },
+      'equipamento': {
+        'equipamentoregralist': '$gateUrl/equipamentoregralist',
       },
       'alertas': {
         'categorias': '$gateUrl/listas',

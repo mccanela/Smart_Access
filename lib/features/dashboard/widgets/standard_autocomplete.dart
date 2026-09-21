@@ -36,25 +36,44 @@ Widget buildStandardAutocomplete<T extends Object>({
     onSelected: onSelected,
     fieldViewBuilder:
         (context, textEditingController, focusNode, onFieldSubmitted) {
+      // Mantém a sincronia quando uma opção é efetivamente selecionada pelo usuário
       if (selectedItem != null &&
           textEditingController.text != itemAsString(selectedItem)) {
         textEditingController.text = itemAsString(selectedItem);
         textEditingController.selection = TextSelection.fromPosition(
             TextPosition(offset: textEditingController.text.length));
       }
-      if (selectedItem == null && textEditingController.text.isNotEmpty) {
-        textEditingController.text = '';
-      }
 
-      return CharacterCounterField(
-        controller: textEditingController,
-        focusNode: focusNode,
-        labelText: labelText,
-        decoration:
-            inputDecorationPadrao(context, labelText: labelText).copyWith(
-          prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20) : null,
-          suffixIcon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
-        ),
+      // O bloco que apagava a digitação indevidamente durante os eventos do SignalR foi removido.
+
+      // Envolvemos em um listener reativo para que o "X" apareça e suma instantaneamente
+      return ValueListenableBuilder<TextEditingValue>(
+        valueListenable: textEditingController,
+        builder: (context, value, child) {
+          return CharacterCounterField(
+            controller: textEditingController,
+            focusNode: focusNode,
+            labelText: labelText,
+            decoration:
+                inputDecorationPadrao(context, labelText: labelText).copyWith(
+              prefixIcon:
+                  prefixIcon != null ? Icon(prefixIcon, size: 20) : null,
+              // Se há texto digitado ou item selecionado, mostra o botão X
+              suffixIcon: value.text.isNotEmpty || selectedItem != null
+                  ? IconButton(
+                      icon: const Icon(Icons.close,
+                          size: 18, color: Colors.redAccent),
+                      onPressed: () {
+                        textEditingController.clear();
+                        onSelected(
+                            null); // Dispara o evento avisando a tela pai (dashboard) que a seleção foi anulada
+                        focusNode.requestFocus();
+                      },
+                    )
+                  : const Icon(Icons.arrow_drop_down, color: Colors.grey),
+            ),
+          );
+        },
       );
     },
     optionsViewBuilder: (context, onSelectedOption, options) {

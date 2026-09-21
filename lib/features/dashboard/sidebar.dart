@@ -52,8 +52,11 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
       false; // Define se o menu abre para o lado ou para cima
   String _urlEncomendas =
       'https://encomenda.conectcon.net.br/'; // Nome do porteiro para tooltip
+  String _urlGestor =
+      'https://smart-manager-7ji.pages.dev/'; // Nome do porteiro para tooltip
 
   bool _isSmartAccess = false; // se tem SmartAccess
+  String _app_slug = 'conectcon';
   //-----------------------------//
   // Método público para resetar seleção
   //-----------------------------//
@@ -71,6 +74,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
       if (mounted) {
         setState(() {
           _isSmartAccess = prefs.getBool('is_smart_access') ?? false;
+          _app_slug = prefs.getString('app_slug') ?? 'conectcon';
         });
       }
     } catch (e) {
@@ -94,7 +98,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
 
   List<_SidebarItemData> get _items {
     _loadPreferences();
-
     final allItems = [
       // _SidebarItemData('Ocorrências', Icons.report_problem_rounded, 'ocorrencias'),
       _SidebarItemData('Chaves', Icons.key_rounded, 'chaves'),
@@ -104,7 +107,9 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
           'Alertas', Icons.notifications_active_rounded, 'alertas'),
       _SidebarItemData('Turnos', Icons.schedule_rounded, 'turnos'),
       _SidebarItemData('Encomenda', Icons.inventory_2_rounded, null,
-          url: _urlEncomendas),
+          url: _urlEncomendas + _app_slug),
+      _SidebarItemData('Cadastros', Icons.switch_account, null,
+          url: _urlGestor + _app_slug),
       _SidebarItemData('Novia X', Icons.auto_awesome, 'noviax'),
     ];
 // ADICIONE ESTA CONDIÇÃO AQUI
@@ -247,10 +252,11 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
 
   void _onItemTap(int index) {
     final item = _items[index];
-
+    final label = item.label;
     // Se o item tem URL, abrir em nova aba sem alterar seleção
+    print('URL: ${item.url} label: $label');
     if (item.url != null) {
-      html.window.open(item.url!, '_blank');
+      html.window.open(item.url!, '$label');
       return;
     }
 
@@ -549,7 +555,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                     ),
                   ),
                 ),
-                // Botão de Configurações - Agora fora do scroll
                 CompositedTransformTarget(
                   link: _settingsLayerLink,
                   child: MouseRegion(
@@ -572,14 +577,19 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                         selected: _showSettingsMenu,
                         iconSize: iconSize,
                         selectedColor: selectedItemColor,
-                        onTap:
-                            () {}, // Tap não é mais necessário, mas seguro manter
+                        onTap: () {
+                          // ADICIONADO: Lógica para abrir/fechar no toque (mobile)
+                          if (_showSettingsMenu) {
+                            _closeSettingsMenu();
+                          } else {
+                            _openSettingsMenu();
+                          }
+                        },
                         showTooltip: false,
                       ),
                     ),
                   ),
-                ),
-                // Versão do app
+                ), // Versão do app
                 Container(
                   color: middleSectionColor,
                   padding: const EdgeInsets.only(bottom: 4),

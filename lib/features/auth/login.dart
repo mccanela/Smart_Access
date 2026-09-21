@@ -261,6 +261,9 @@ class _LoginPageState extends State<LoginPage> {
             ],
           ),
         );
+        setState(() {
+          _loading = false;
+        });
         return;
       }
     }

@@ -191,14 +191,14 @@ Future<void> _autoUpdateIfNeeded() async {
   try {
     final prefs = await SharedPreferences.getInstance();
     final cached = prefs.getString('app_version');
+
     if (cached == null) {
       await prefs.setString('app_version', appVersion);
       return;
     }
+
     if (cached != appVersion) {
       await prefs.setString('app_version', appVersion);
-      // O dart:html foi removido daqui para garantir compatibilidade com WASM.
-      // A gestão de cache na Web deverá agora ser feita pelo Service Worker padrão do Flutter.
     }
   } catch (_) {}
 }

@@ -106,8 +106,6 @@ class _CameraModalWidgetState extends State<_CameraModalWidget> {
 
         return _root ?? tempRoot;
       });
-      print(
-          'PlatformViewFactory registrada com sucesso para $_currentViewType');
     } catch (e) {
       // Factory já pode estar registrada ou há outro erro
       print('Erro ao registrar PlatformViewFactory para $_currentViewType: $e');
@@ -137,8 +135,6 @@ class _CameraModalWidgetState extends State<_CameraModalWidget> {
       // Registrar a factory com viewType único antes de criar elementos
       _registerSimpleViewFactory();
 
-      // Para Flutter Web, usar o mesmo elemento que a factory criou
-      print('Preparando _root element');
       if (_root == null) {
         _root = html.DivElement()
           ..style.width = '100%'

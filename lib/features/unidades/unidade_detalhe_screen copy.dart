@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../../core/services/crypto_utils.dart';
-import '../../core/config/app_version.dart' as config;
+// Funções auxiliares para cores adaptáveis ao tema
 import '../../shared/widgets/registro_dispositivos_page.dart';
 import '../../core/config/api_config.dart';
 
@@ -74,23 +73,6 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
   List<Map<String, dynamic>> _prestadores = [];
   bool _loading = true;
   bool _mostrarBicicletas = false;
-
-  // Controle de privacidade da API
-  bool _escondeDadosGate = false;
-
-  // Controle da Aba Selecionada
-  int _selectedTabIndex = 0;
-
-  // Lista de abas para a Top Bar
-  final List<Map<String, dynamic>> _tabs = [
-    {'icon': Icons.person, 'label': 'Moradores'},
-    {'icon': Icons.work, 'label': 'Colaboradores'},
-    {'icon': Icons.directions_car, 'label': 'Veículos'},
-    {'icon': Icons.groups, 'label': 'Visitantes'},
-    {'icon': Icons.pets, 'label': 'Pets'},
-    {'icon': Icons.phone, 'label': 'Contatos'},
-  ];
-
   //-----------------------------//
   // Mapa para armazenar nomes dos associados dos veículos
   //-----------------------------//
@@ -105,53 +87,6 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
         'UnidadeDetalheScreen initState - permissaoAcessoPessoas: ${widget.permissaoAcessoPessoas}');
     _carregarDadosUnidade();
   }
-
-  // --- Função responsável por registrar o log de acesso ATUALIZADA ---
-  Future<void> _registrarLogVisualizacao(int targetUsuarioId,
-      String nomeUsuario, String conteudoInformacao) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
-      final tokenSessao =
-          (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-
-      final url = Uri.parse(ApiConfig.getEndpoint('unidade', 'UsuarioLog'));
-
-      final String condominioIdStr = await ApiConfig.getCondominioId();
-      final int condominioId = int.tryParse(condominioIdStr) ?? 0;
-
-// Buscando o IP antes de montar o payload
-      String ipDoUsuario = await config.getDeviceIp();
-
-      final payload = {
-        "condominio_id": condominioId,
-        "usuario_id": targetUsuarioId,
-        "funcoes_id": 134,
-        "usuarioope_id": targetUsuarioId,
-        "ip_addr": ipDoUsuario,
-        "texto_detalhe":
-            "Visualização de dado sensível: $conteudoInformacao (Usuário: $nomeUsuario)",
-      };
-
-      print('📝 Disparando log de visualização: $payload');
-
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
-
-      if (response.statusCode != 200) {
-        print('⚠️ Falha ao registrar log. Status: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('⚠️ Erro ao registrar log de visualização: $e');
-    }
-  }
-  // ---------------------------------------------------------
 
   Future<void> _carregarDadosUnidade() async {
     setState(() => _loading = true);
@@ -192,9 +127,9 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
         final veiculos =
             List<Map<String, dynamic>>.from(data['data']?['veiculos'] ?? []);
 
-        final configData = data['data']?['config'] ?? {};
-        final escondeDados = configData['escondedados_gate'] == 'S';
-
+        //-----------------------------//
+        // Criar mapa de nomes dos associados para veículos
+        //-----------------------------//
         final nomesAssociadosTemp = <int, String>{};
         for (final usuario in unidades) {
           final usuarioId = usuario['usuario_id'] ?? usuario['id'];
@@ -206,15 +141,18 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
             nomesAssociadosTemp[usuarioId] = nome;
           }
         }
+        //-----------------------------//
 
+        // Categorizar os usuários por situação
         final moradoresTemp = <Map<String, dynamic>>[];
         final visitantesTemp = <Map<String, dynamic>>[];
         final prestadoresTemp = <Map<String, dynamic>>[];
 
         for (final usuario in unidades) {
           final situacao = usuario['situacao'];
+          // Usar diretamente os dados que vêm da API unidadelist
           final usuarioData = {
-            ...usuario,
+            ...usuario, // Copiar todos os campos da API
             'tipo_display': situacao == 'P'
                 ? 'Proprietário'
                 : situacao == 'M'
@@ -225,14 +163,14 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
           };
 
           switch (situacao) {
-            case 'P':
-            case 'M':
+            case 'P': // Proprietário
+            case 'M': // Morador
               moradoresTemp.add(usuarioData);
               break;
-            case 'F':
+            case 'F': // Visitante
               visitantesTemp.add(usuarioData);
               break;
-            case 'S':
+            case 'S': // Prestador
               prestadoresTemp.add(usuarioData);
               break;
           }
@@ -244,9 +182,11 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
           _visitantes = visitantesTemp;
           _prestadores = prestadoresTemp;
           _nomesAssociados = nomesAssociadosTemp;
-          _escondeDadosGate = escondeDados;
           _loading = false;
         });
+
+        print(
+            'Carregados: ${_moradores.length} moradores, ${_veiculos.length} veículos, ${_visitantes.length} visitantes, ${_prestadores.length} prestadores');
       } else {
         print(
             'Erro na API unidadelist: ${response.statusCode} - ${response.body}');
@@ -255,29 +195,6 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
     } catch (e) {
       print('Erro ao carregar dados da unidade: $e');
       setState(() => _loading = false);
-    }
-  }
-
-  Widget _buildSelectedTabContent() {
-    switch (_selectedTabIndex) {
-      case 0:
-        return _section('Moradores', _residentItems());
-      case 1:
-        return _section('Colaboradores', _providerItems());
-      case 2:
-        return _section(
-            _veiculos.any((v) => v['automarca_id']?.toString() == '99')
-                ? 'Veículos I Bicicletas'
-                : 'Veículos',
-            _vehicleItems());
-      case 3:
-        return _section('Visitantes', _visitorItems());
-      case 4:
-        return _section('Pets', _petItems());
-      case 5:
-        return _section('Contatos', _contactItems());
-      default:
-        return const SizedBox.shrink();
     }
   }
 
@@ -290,7 +207,7 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
       color: getBackgroundColor(context),
       child: Column(
         children: [
-          // Header
+          // Header matching Ocorrências modal style
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             decoration: const BoxDecoration(
@@ -321,86 +238,65 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
               ],
             ),
           ),
-
-          // --- TOP BAR SCROLLABLE ---
-          Container(
-            width: double.infinity,
-            color: getBackgroundColor(context),
-            padding: const EdgeInsets.symmetric(vertical: 12.0),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Row(
-                children: List.generate(_tabs.length, (index) {
-                  final isSelected = _selectedTabIndex == index;
-                  final tab = _tabs[index];
-
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _selectedTabIndex = index;
-                      });
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: const EdgeInsets.only(right: 8.0),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0, vertical: 8.0),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? CupertinoColors.activeBlue.withValues(alpha: 0.1)
-                            : getSurfaceColor(context),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: isSelected
-                              ? CupertinoColors.activeBlue
-                              : getBorderColor(context),
-                          width: 1,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            tab['icon'],
-                            size: 18,
-                            color: isSelected
-                                ? CupertinoColors.activeBlue
-                                : getSecondaryTextColor(context),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            tab['label'],
-                            style: TextStyle(
-                              fontWeight: isSelected
-                                  ? FontWeight.w600
-                                  : FontWeight.w500,
-                              fontSize: 14,
-                              color: isSelected
-                                  ? CupertinoColors.activeBlue
-                                  : getSecondaryTextColor(context),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }),
-              ),
-            ),
-          ),
-          // --- FIM DA TOP BAR ---
-
-          // Área de Conteúdo
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : Padding(
-                    padding: EdgeInsets.only(
-                      left: MediaQuery.of(context).size.width < 600 ? 16 : 24,
-                      right: MediaQuery.of(context).size.width < 600 ? 16 : 24,
-                      bottom: MediaQuery.of(context).size.width < 600 ? 16 : 24,
+                    padding: EdgeInsets.all(
+                        MediaQuery.of(context).size.width < 600 ? 16 : 24),
+                    child: Column(
+                      children: [
+                        // Primeira linha: Moradores e Veículos
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                  child:
+                                      _section('Moradores', _residentItems())),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                  child: _section(
+                                      _veiculos.any((v) =>
+                                              v['automarca_id']?.toString() ==
+                                              '99')
+                                          ? 'Veículos I Bicicletas'
+                                          : 'Veículos',
+                                      _vehicleItems())),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        // Segunda linha: Colaboradores (Prestadores) e Visitantes
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                  child: _section(
+                                      'Colaboradores', _providerItems())),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                  child:
+                                      _section('Visitantes', _visitorItems())),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        // Terceira linha: Contatos e Pets
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                  child: _section('Contatos', _contactItems())),
+                              const SizedBox(width: 16),
+                              Expanded(child: _section('Pets', _petItems())),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    child: _buildSelectedTabContent(),
                   ),
           )
         ],
@@ -410,7 +306,6 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
 
   Widget _section(String title, List<Widget> children) {
     return Container(
-      width: double.infinity,
       padding:
           EdgeInsets.all(MediaQuery.of(context).size.width < 600 ? 12 : 16),
       decoration: BoxDecoration(
@@ -420,7 +315,7 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.max,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
@@ -559,11 +454,15 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
     );
   }
 
+  // Mapa para armazenar o estado das fotos: user_id -> base64
   final Map<int, String?> _loadedPhotos = {};
+  // Mapa para controlar se a foto está sendo carregada: user_id -> bool
   final Map<int, bool> _loadingPhotos = {};
+  // Mapa para controlar visibilidade da foto: user_id -> bool
   final Map<int, bool?> _photoVisibility = {};
 
   Future<void> _togglePhoto(int id, String tipo, int condominioId) async {
+    // Se já está visível, ocultar
     if (_photoVisibility[id] == true) {
       setState(() {
         _photoVisibility[id] = false;
@@ -571,6 +470,7 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
       return;
     }
 
+    // Se já tem foto carregada, apenas mostrar
     if (_loadedPhotos.containsKey(id) && _loadedPhotos[id] != null) {
       setState(() {
         _photoVisibility[id] = true;
@@ -578,6 +478,7 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
       return;
     }
 
+    // Buscar foto
     setState(() {
       _loadingPhotos[id] = true;
       _photoVisibility[id] = true;
@@ -608,6 +509,8 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
         'usuario_id': id,
       };
 
+      print('📸 Buscando foto via fotolistar: $url - Body: $payload');
+
       final response = await http.post(
         url,
         headers: {
@@ -619,22 +522,32 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
 
       if (!mounted) return null;
 
+      print('📸 Resposta fotolistar: ${response.statusCode}');
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        print('📸 Dados recebidos: $data');
 
         String? fotoResult;
 
         if (data is Map) {
+          // Verifica se 'data' é uma lista (estrutura comum)
           if (data['data'] is List && data['data'].isNotEmpty) {
             final item = data['data'][0];
             fotoResult = item['fotourl'];
-          } else if (data['data'] is Map) {
+          }
+          // Verifica se 'data' é um Map direto
+          else if (data['data'] is Map) {
             fotoResult = data['data']['fotourl'];
-          } else if (data['fotourl'] != null) {
+          }
+          // Caso a API retorne 'fotourl' na raiz (fallback)
+          else if (data['fotourl'] != null) {
             fotoResult = data['fotourl'];
           }
 
+          // Se ainda não encontrou, tenta 'foto' ou 'arquivo' se for URL
           if (fotoResult == null) {
+            // Tenta pegar de data[0] novamente se falhou acima
             dynamic item;
             if (data['data'] is List && data['data'].isNotEmpty) {
               item = data['data'][0];
@@ -691,52 +604,11 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
     return _maskName(nomeCompleto);
   }
 
-  String _buildPhoneString(Map<String, dynamic> user) {
-    final area = user['area_cel']?.toString().trim() ?? '';
-    final ddd = user['ddd_cel']?.toString().trim() ??
-        user['ddd_fone']?.toString().trim() ??
-        '';
-    final celular = user['nro_celular']?.toString().trim() ??
-        user['nro_fone']?.toString().trim() ??
-        '';
-
-    if (celular.isEmpty && ddd.isEmpty) return '';
-
-    String result = '';
-    if (area.isNotEmpty) result += '+$area ';
-    if (ddd.isNotEmpty) result += '($ddd) ';
-    result += celular;
-
-    return result.trim();
-  }
-
-  String _maskPhone(String phone) {
-    if (phone.isEmpty) return '';
-    int digitsToKeep = 3;
-    String masked = '';
-
-    for (int i = phone.length - 1; i >= 0; i--) {
-      if (RegExp(r'\d').hasMatch(phone[i])) {
-        if (digitsToKeep > 0) {
-          masked = phone[i] + masked;
-          digitsToKeep--;
-        } else {
-          masked = '*' + masked;
-        }
-      } else {
-        masked = phone[i] + masked;
-      }
-    }
-    return masked;
-  }
-
   List<Widget> _residentItems() => _moradores.map((morador) {
         final int id = morador['id'] ?? morador['usuario_id'] ?? 0;
         final int condId = widget.unidade['condominio_id'] is int
             ? widget.unidade['condominio_id']
             : int.tryParse(widget.unidade['condominio_id'].toString()) ?? 0;
-
-        final telefoneFormatado = _buildPhoneString(morador);
 
         return _listTile(
           morador['nome'] ?? 'Residente',
@@ -745,8 +617,18 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
           condominioId: condId,
           badge: morador['tipo_display'] ?? '',
           subtitle: morador['relacao'],
-          phone: telefoneFormatado.isNotEmpty ? telefoneFormatado : null,
           showAccessBadge: widget.permissaoAcessoPessoas == true,
+          /*onTap: () {
+            if (widget.onOpenPanel != null &&
+                widget.permissaoAcessoPessoas == true) {
+              widget.onOpenPanel!(
+                RegistroDispositivosPage(
+                  onClose: widget.onBackToParent ?? widget.onClose,
+                  morador: morador,
+                ),
+              );
+            }
+          },*/
         );
       }).toList();
 
@@ -770,8 +652,10 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
         }
       }
 
-      final int id =
-          veiculo['usuarioauto_id'] ?? veiculo['usuarioauto_id'] ?? 0;
+      // Usar ID do veículo ou do proprietário? Requisito pediu 'usuario_id', então deve ser do morador vinculado ou do próprio veículo se tiver
+      final int id = veiculo['usuarioauto_id'] ??
+          veiculo['usuarioauto_id'] ??
+          0; // Ajustar conforme necessidade real
       final int condId = widget.unidade['condominio_id'] is int
           ? widget.unidade['condominio_id']
           : int.tryParse(widget.unidade['condominio_id'].toString()) ?? 0;
@@ -784,6 +668,22 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
         subtitle: subtitle,
         showAccessBadge: widget.permissaoAcessoPessoas == true,
         icon: _mostrarBicicletas ? Icons.pedal_bike : Icons.directions_car,
+        /*onTap: () {
+          if (widget.onOpenPanel != null &&
+              widget.permissaoAcessoPessoas == true) {
+            widget.onOpenPanel!(
+              RegistroDispositivosPage(
+                onClose: widget.onBackToParent ?? widget.onClose,
+                morador: {
+                  ...veiculo,
+                  'tipo': 'Veículo',
+                  'situacao': 'V',
+                },
+                modoVeiculo: true,
+              ),
+            );
+          }
+        },*/
       );
     }).toList();
   }
@@ -798,17 +698,26 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
             ? widget.unidade['condominio_id']
             : int.tryParse(widget.unidade['condominio_id'].toString()) ?? 0;
 
-        final telefoneFormatado = _buildPhoneString(visitante);
-
         return _listTile(
           visitante['nome'] ?? 'Visitante',
           id: id,
           tipo: 'USU',
           condominioId: condId,
           subtitle: visitante['relacao'],
-          phone: telefoneFormatado.isNotEmpty ? telefoneFormatado : null,
           showAccessBadge: widget.permissaoAcessoPessoas == true,
           chip: flgAnunciar ? 'Anunciar visitante' : null,
+          /*onTap: () {
+            if (widget.onOpenPanel != null &&
+                widget.permissaoAcessoPessoas == true) {
+              widget.onOpenPanel!(
+                RegistroDispositivosPage(
+                  onClose: widget.onBackToParent ?? widget.onClose,
+                  morador: visitante,
+                  modoPrestadorVisitante: true,
+                ),
+              );
+            }
+          },*/
         );
       }).toList();
 
@@ -822,21 +731,32 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
             ? widget.unidade['condominio_id']
             : int.tryParse(widget.unidade['condominio_id'].toString()) ?? 0;
 
-        final telefoneFormatado = _buildPhoneString(prestador);
-
         return _listTile(
           prestador['nome'] ?? 'Prestador',
           id: id,
           tipo: 'USU',
           condominioId: condId,
-          phone: telefoneFormatado.isNotEmpty ? telefoneFormatado : null,
           chip: flgAnunciar ? 'Anunciar colaborador' : null,
           showAccessBadge: widget.permissaoAcessoPessoas == true,
           icon: Icons.badge,
+          /*onTap: () {
+            if (widget.onOpenPanel != null &&
+                widget.permissaoAcessoPessoas == true) {
+              widget.onOpenPanel!(
+                RegistroDispositivosPage(
+                  onClose: widget.onBackToParent ?? widget.onClose,
+                  morador: prestador,
+                  modoPrestadorVisitante: true,
+                ),
+              );
+            }
+          },*/
         );
       }).toList();
 
   List<Widget> _contactItems() {
+    // TODO: Implementar carregamento de contatos da API
+    // Por enquanto, retorna uma mensagem de placeholder
     return [
       Center(
         child: Padding(
@@ -854,6 +774,8 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
   }
 
   List<Widget> _petItems() {
+    // TODO: Implementar carregamento de pets da API
+    // Por enquanto, retorna uma mensagem de placeholder
     return [
       Center(
         child: Padding(
@@ -876,24 +798,19 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
     required String tipo,
     required int condominioId,
     String? subtitle,
-    String? phone,
     String? badge,
     String? chip,
     bool showAccessBadge = false,
     IconData icon = Icons.person,
     VoidCallback? onTap,
   }) {
+    // Estado da foto
     final bool isVisible = _photoVisibility[id] ?? false;
     final bool isLoading = _loadingPhotos[id] ?? false;
     final String? photoData = _loadedPhotos[id];
     final bool hasPhoto = photoData != null && photoData.isNotEmpty;
 
     final String displayedTitle = _formatarNome(title, id: id);
-
-    final bool isRevealed = _revealedPii.contains('nome_$id');
-    final String displayedPhone = (phone != null && phone.isNotEmpty)
-        ? (_escondeDadosGate && !isRevealed ? _maskPhone(phone) : phone)
-        : '';
 
     return InkWell(
       onTap: onTap,
@@ -907,13 +824,13 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
           border: Border.all(color: getBorderColor(context)),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Área da foto / Visualização
             GestureDetector(
               onTap: () => _togglePhoto(id, tipo, condominioId),
               child: Container(
-                width: 300,
-                height: 300,
+                width: 70, // Tamanho fixo para o quadrado da foto
+                height: 70,
                 decoration: BoxDecoration(
                   color: isDarkMode(context)
                       ? Colors.black26
@@ -959,19 +876,20 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
                                 (isVisible && !hasPhoto)
                                     ? Icons.no_photography
                                     : Icons.camera_alt,
-                                size: 24,
+                                size:
+                                    24, // Ícone um pouco maior já que não tem texto
                                 color: Colors.grey.shade600,
                               ),
                             ),
                 ),
               ),
             ),
-            const SizedBox(width: 20),
+
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 10),
                   GestureDetector(
                     onTap: () {
                       setState(() {
@@ -980,8 +898,6 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
                           _revealedPii.remove(key);
                         } else {
                           _revealedPii.add(key);
-                          _registrarLogVisualizacao(
-                              id, title, title); // <-- Passando "Nome"
                         }
                       });
                     },
@@ -995,44 +911,45 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
                     ),
                   ),
                   const SizedBox(height: 4),
+                  // Linha de tags: Smart Access | Proprietário | ...
+                  /*
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 4,
+                    children: [
+                      if (showAccessBadge) ...[
+                        Text(
+                          'Smart Access',
+                          style: TextStyle(
+                            color: getTextColor(context),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        if (badge != null)
+                          Text('|',
+                              style: TextStyle(
+                                  color: getSecondaryTextColor(context),
+                                  fontSize: 12)),
+                      ],
+                      if (badge != null)
+                        Text(
+                          badge,
+                          style: TextStyle(
+                            color: getTextColor(context),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                    ],
+                  ),*/
                   if (subtitle != null) ...[
                     const SizedBox(height: 4),
                     Text(subtitle,
                         style: TextStyle(
                             color: getSecondaryTextColor(context),
                             fontWeight: FontWeight.w500,
-                            fontSize: 14)),
-                  ],
-                  if (displayedPhone.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          final key = 'nome_$id';
-                          if (_revealedPii.contains(key)) {
-                            _revealedPii.remove(key);
-                          } else {
-                            _revealedPii.add(key);
-                            _registrarLogVisualizacao(id, title,
-                                phone ?? ''); // <-- Passando "Telefone"
-                          }
-                        });
-                      },
-                      child: Row(
-                        children: [
-                          Icon(Icons.phone,
-                              size: 14, color: getSecondaryTextColor(context)),
-                          const SizedBox(width: 6),
-                          Text(
-                            displayedPhone,
-                            style: TextStyle(
-                                color: getSecondaryTextColor(context),
-                                fontWeight: FontWeight.w500,
-                                fontSize: 14),
-                          ),
-                        ],
-                      ),
-                    ),
+                            fontSize: 12)),
                   ],
                   if (chip != null) ...[
                     const SizedBox(height: 8),

@@ -19,6 +19,7 @@ import '../../shared/widgets/inline_feedback.dart';
 import '../../shared/widgets/inline_period_picker.dart';
 import '../../shared/widgets/inline_single_date_picker.dart';
 import '../dashboard/widgets/segmented_tab_bar.dart';
+import '../../shared/widgets/filter_tab.dart';
 
 // Componente RangeCalendarDialog estilo ShadCalendar
 class RangeCalendarDialog extends StatefulWidget {
@@ -816,14 +817,13 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
   }
 
   Widget _buildNovaOcorrenciaPanel() {
-    return Container(
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: getFormGrisColor(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: getBorderColor(context)),
-      ),
-      child: Column(
+    return FilterTab(
+      title:
+          'Nova Ocorrência', // Você pode mudar para 'Filtros de Ocorrência' se preferir
+      themeColor: const Color(0xFFF59E0B), // Amarelo da aba Ocorrências
+      icon: Icons.tune,
+      initiallyExpanded: false,
+      content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           LayoutBuilder(builder: (context, constraints) {
@@ -958,6 +958,7 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
           CustomInput(
             hintText: 'Ocorrência',
             maxLines: 5,
+            maxLength: 500, // 👉 Adicione esta linha
             controller: _descricaoController,
           ),
           const SizedBox(height: 24),
@@ -1095,15 +1096,12 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 1. CONTAINER DOS FILTROS
-        Container(
-          padding: const EdgeInsets.all(16.0),
-          decoration: BoxDecoration(
-            color: getFormGrisColor(context),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: getBorderColor(context)),
-          ),
-          child: Column(
+        FilterTab(
+          title: 'Filtros de Histórico',
+          themeColor: const Color(0xFFF59E0B), // Amarelo da aba Ocorrências
+          icon: Icons.tune,
+          initiallyExpanded: false,
+          content: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               LayoutBuilder(builder: (context, constraints) {
@@ -1223,31 +1221,41 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
                   });
                   _carregarHistorico();
                 },
-                trailing: _buildTransparentIconGroup(
-                  context,
-                  [
-                    {
-                      'icon': Icons.search,
-                      'color': IconColors.search(context),
-                      'tooltip': 'Buscar',
-                      'onPressed': () {
-                        _carregarHistorico();
+                // ❌ A propriedade 'trailing' foi removida daqui
+              ),
+
+              // 👇 ADICIONAMOS UM ESPAÇAMENTO E OS BOTÕES EM UMA NOVA LINHA
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment:
+                    MainAxisAlignment.end, // Alinha os botões à direita
+                children: [
+                  _buildTransparentIconGroup(
+                    context,
+                    [
+                      {
+                        'icon': Icons.search,
+                        'color': IconColors.search(context),
+                        'tooltip': 'Buscar',
+                        'onPressed': () {
+                          _carregarHistorico();
+                        },
                       },
-                    },
-                    {
-                      'icon': Symbols.ink_eraser,
-                      'color': IconColors.delete(context),
-                      'tooltip': 'Limpar filtros',
-                      'onPressed': () {
-                        setState(() {
-                          _filtroDataInicio = null;
-                          _filtroDataFim = null;
-                        });
-                        _carregarHistorico();
+                      {
+                        'icon': Symbols.ink_eraser,
+                        'color': IconColors.delete(context),
+                        'tooltip': 'Limpar filtros',
+                        'onPressed': () {
+                          setState(() {
+                            _filtroDataInicio = null;
+                            _filtroDataFim = null;
+                          });
+                          _carregarHistorico();
+                        },
                       },
-                    },
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               ),
             ],
           ),
@@ -1286,6 +1294,9 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
                           '${ocorrencia['nomeusu_intr'] ?? ''} - ${ocorrencia['unidadeusu_intr'] ?? ''} /${ocorrencia['prediousu_intr'] ?? ''} registrou em ${(ocorrencia['dt_ocorrencia'] ?? ocorrencia['data'] ?? '').split(' ').first}',
                           ocorrencia['mensagem_txt'] ?? '',
                           'Local: ${ocorrencia['local_txt'] ?? 'Não especificado'}',
+                          // 👇 ADICIONE ESTAS DUAS LINHAS:
+                          temFoto: ocorrencia['tem_foto'] == true,
+                          linkFoto: ocorrencia['link_foto'] as String?,
                         );
                       },
                     ),
@@ -1326,7 +1337,8 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
     );
   }
 
-  Widget _buildOcorrenciaItem(String date, String title, String author) {
+  Widget _buildOcorrenciaItem(String date, String title, String author,
+      {bool temFoto = false, String? linkFoto}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(16),
@@ -1336,6 +1348,8 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
         border: Border.all(color: getBorderColor(context), width: 1),
       ),
       child: Row(
+        crossAxisAlignment:
+            CrossAxisAlignment.start, // Garante que fiquem alinhados no topo
         children: [
           Expanded(
             child: Column(
@@ -1361,6 +1375,18 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
               ],
             ),
           ),
+          // 👇 BOTÃO PARA A FOTO
+          if (temFoto && linkFoto != null && linkFoto.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0),
+              child: IconButton(
+                icon: const Icon(Icons.image),
+                color: IconColors.camera(
+                    context), // Mantendo o seu padrão de cores
+                tooltip: 'Ver foto anexada',
+                onPressed: () => _mostrarFotoModal(linkFoto),
+              ),
+            ),
         ],
       ),
     );
@@ -1418,6 +1444,76 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
 
   String _formatarDataParaDisplay(DateTime date) {
     return "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}";
+  }
+
+  void _mostrarFotoModal(String url) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // IMAGEM
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                color: getBackgroundColor(context),
+                child: Image.network(
+                  url,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Container(
+                      height: 200,
+                      width: 200,
+                      alignment: Alignment.center,
+                      child: CircularProgressIndicator(
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded /
+                                loadingProgress.expectedTotalBytes!
+                            : null,
+                      ),
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    height: 150,
+                    width: double.infinity,
+                    alignment: Alignment.center,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.broken_image,
+                            size: 48, color: getSecondaryTextColor(context)),
+                        const SizedBox(height: 8),
+                        Text('Erro ao carregar imagem',
+                            style: TextStyle(
+                                color: getSecondaryTextColor(context))),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // BOTÃO FECHAR
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Material(
+                color: Colors.black.withOpacity(0.6),
+                shape: const CircleBorder(),
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _showDateRangeTimePicker(

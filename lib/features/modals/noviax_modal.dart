@@ -8,6 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/crypto_utils.dart';
 import '../../shared/widgets/screen_header.dart';
 import '../../shared/widgets/character_counter_field.dart';
+import 'package:material_symbols_icons/symbols.dart';
+import '../../core/theme/icon_colors.dart';
+import '../dashboard/widgets/transparent_icon_group.dart';
 
 /// Painel visual do assistente ConectCon IA.
 class ConectConIAPanel extends StatefulWidget {
@@ -33,12 +36,15 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
   List<Map<String, String>> _historicoPerguntas = [];
   String? _perguntaSelecionada;
   String? _respostaSelecionada;
+  int _consultasRealizadas = 0;
+  int _consultasTotais = 5;
 
   @override
   void initState() {
     super.initState();
     _loadPreferences();
     _carregarHistoricoLocal();
+    _carregarControleConsultas();
   }
 
   Future<void> _loadPreferences() async {
@@ -51,6 +57,56 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
       }
     } catch (e) {
       debugPrint('Erro ao carregar is_smart_access: $e');
+    }
+  }
+
+// --- Controle de Consultas Diárias ---
+  Future<void> _carregarControleConsultas() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      final savedDate = prefs.getString('noviax_last_query_date');
+
+      if (savedDate != today) {
+        // Se mudou o dia (ou é o primeiro acesso com essa chave nova)
+        await prefs.setString('noviax_last_query_date', today);
+        await prefs.setInt('noviax_consultas_realizadas', 0); // <--- CHAVE NOVA
+        if (mounted) {
+          setState(() {
+            _consultasRealizadas = 0;
+          });
+        }
+      } else {
+        // Se é o mesmo dia
+        final count =
+            prefs.getInt('noviax_consultas_realizadas') ?? 0; // <--- CHAVE NOVA
+        if (mounted) {
+          setState(() {
+            _consultasRealizadas = count;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar controle de consultas: $e');
+    }
+  }
+
+  Future<void> _incrementarConsultas() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Garante que só incrementa se não tiver estourado o limite
+      if (_consultasRealizadas < _consultasTotais) {
+        final newCount = _consultasRealizadas + 1;
+        await prefs.setInt(
+            'noviax_consultas_realizadas', newCount); // <--- CHAVE NOVA
+        if (mounted) {
+          setState(() {
+            _consultasRealizadas = newCount;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao incrementar consulta: $e');
     }
   }
 
@@ -104,6 +160,15 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
     final pergunta = _leftSearchController.text.trim();
     if (pergunta.isEmpty) return;
 
+    if (_consultasRealizadas >= _consultasTotais) {
+      FeedbackUtils.showWarning(
+        context: context,
+        title: 'Limite Atingido',
+        message:
+            'Você já atingiu o limite de $_consultasTotais consultas por dia.',
+      );
+      return;
+    }
     _focusNode.unfocus();
     setState(() {
       _isLoading = true;
@@ -159,6 +224,9 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
 
         // Salva localmente a pergunta e a resposta formatada
         await _salvarPerguntaNoHistorico(pergunta, textoResposta);
+
+        // 👇 2. DECREMENTA APENAS QUANDO A IA RESPONDER COM SUCESSO
+        await _incrementarConsultas();
       } else {
         FeedbackUtils.showWarning(
           context: context,
@@ -190,6 +258,9 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
 
   @override
   Widget build(BuildContext context) {
+    // ADICIONADO: Detectar se é uma tela de celular
+    final isMobile = MediaQuery.of(context).size.width < 800;
+
     return Container(
       decoration: BoxDecoration(
         color: getBackgroundColor(context),
@@ -211,15 +282,27 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: _buildLeftColumn()),
-                  const SizedBox(width: 18),
-                  Expanded(child: _buildRightColumn()),
-                ],
-              ),
+              // ADICIONADO: Reduzir o padding no mobile para ganhar espaço
+              padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
+              child: isMobile
+                  ? Column(
+                      // 📱 NO MOBILE: Empilha verticalmente
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: _buildLeftColumn()),
+                        const SizedBox(height: 16),
+                        Expanded(child: _buildRightColumn()),
+                      ],
+                    )
+                  : Row(
+                      // 💻 NO DESKTOP: Mantém lado a lado
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: _buildLeftColumn()),
+                        const SizedBox(width: 18),
+                        Expanded(child: _buildRightColumn()),
+                      ],
+                    ),
             ),
           ),
         ],
@@ -242,17 +325,25 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
                 const BorderRadius.vertical(top: Radius.circular(14.5)),
             child: Stack(
               children: [
-                Image.network(
-                  'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/geral/noviax.png',
-                  height: 180,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Container(
+                Tooltip(
+                  message:
+                      'NOVIA-X é a inteligência artificial que te auxilia buscando informações na convenção, regimento interno e plano operacional da portaria.', // <--- Isso funciona como o "title" do HTML
+                  child: Image.network(
+                    'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/geral/noviax.png',
                     height: 180,
-                    color: Colors.blueGrey,
-                    alignment: Alignment.center,
-                    child: const Text('Imagem não encontrada',
-                        style: TextStyle(color: Colors.white)),
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    semanticLabel:
+                        'NOVIA-X é a inteligência artificial que te auxilia buscando informações na convenção, regimento interno e plano operacional da portaria.', // <--- Isso funciona como o "alt" do HTML
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      height: 180,
+                      color: Colors.blueGrey,
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'Imagem não encontrada',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
                   ),
                 ),
                 const Positioned(
@@ -267,10 +358,21 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
                     ),
                   ),
                 ),
-                const Positioned(
+                Positioned(
                   top: 12,
                   right: 12,
-                  child: Icon(Icons.info_outline, color: Colors.white),
+                  child: GestureDetector(
+                    onTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'NOVIA-X é a inteligência artificial que te auxilia buscando informações na convenção, regimento interno e plano operacional da portaria.'),
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    },
+                    child: const Icon(Icons.info_outline, color: Colors.white),
+                  ),
                 )
               ],
             ),
@@ -284,15 +386,21 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
                   _buildSearchField(
                     controller: _leftSearchController,
                     labelText: 'Preciso saber como...',
-                    onEnterPressed: _isLoading ? null : _enviar,
+                    onEnterPressed:
+                        (_isLoading || _consultasRealizadas >= _consultasTotais)
+                            ? null
+                            : _enviar,
                   ),
                   const SizedBox(height: 4),
                   Align(
                     alignment: Alignment.centerRight,
                     child: Text(
-                      '2/5 consultas disponíveis hoje',
+                      '$_consultasRealizadas/$_consultasTotais consultas realizadas hoje', // <-- Frase ajustada
                       style: TextStyle(
-                          fontSize: 10, color: getSecondaryTextColor(context)),
+                          fontSize: 10,
+                          color: _consultasRealizadas >= _consultasTotais
+                              ? Colors.red
+                              : getSecondaryTextColor(context)),
                     ),
                   ),
                   const SizedBox(height: 24),
@@ -363,11 +471,28 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
               Icon(Icons.bookmark, color: AppColors.primary),
               const SizedBox(width: 8),
               Text(
-                'Favoritos / Histórico',
+                'Histórico',
                 style: AppTextStyles.title(context),
               ),
               const SizedBox(width: 8),
               Icon(Icons.unfold_more, color: getSecondaryTextColor(context)),
+
+              // ADICIONADO: Empurra o botão de limpar para a direita
+              const Spacer(),
+              if (_perguntaSelecionada != null)
+                TransparentIconGroup([
+                  IconActionData(
+                    icon: Symbols.ink_eraser,
+                    tooltip: 'Limpar seleção atual',
+                    color: IconColors.delete(context),
+                    onPressed: () {
+                      setState(() {
+                        _perguntaSelecionada = null;
+                        _respostaSelecionada = null;
+                      });
+                    },
+                  ),
+                ]),
             ],
           ),
           const SizedBox(height: 20),
@@ -443,23 +568,6 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
                               color: getTextColor(context),
                               height: 1.4),
                         ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            IconButton(
-                                icon: Icon(Icons.thumb_up_alt_outlined,
-                                    color: getSecondaryTextColor(context)),
-                                onPressed: () {}),
-                            IconButton(
-                                icon: Icon(Icons.thumb_down_alt_outlined,
-                                    color: getSecondaryTextColor(context)),
-                                onPressed: () {}),
-                            IconButton(
-                                icon: Icon(Icons.bookmark,
-                                    color: AppColors.primary),
-                                onPressed: () {}),
-                          ],
-                        ),
                       ],
                     )
                   : Center(
@@ -498,23 +606,6 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
           style: TextStyle(
               fontSize: 14, color: getTextColor(context), height: 1.4),
         ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            IconButton(
-                icon: Icon(Icons.thumb_up_alt_outlined,
-                    color: getSecondaryTextColor(context)),
-                onPressed: () {}),
-            IconButton(
-                icon: Icon(Icons.thumb_down_alt_outlined,
-                    color: getSecondaryTextColor(context)),
-                onPressed: () {}),
-            IconButton(
-                icon: Icon(Icons.bookmark_border,
-                    color: getSecondaryTextColor(context)),
-                onPressed: () {}),
-          ],
-        ),
       ],
     );
   }
@@ -524,34 +615,23 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          _perguntaFeita ?? 'Resultado',
+          '"$_perguntaFeita"',
           style: TextStyle(
               fontSize: 16,
+              fontStyle:
+                  FontStyle.italic, // 👇 ISSO AQUI DEIXA O TEXTO EM ITÁLICO
               fontWeight: FontWeight.bold,
               color: getTextColor(context)),
         ),
         const SizedBox(height: 12),
         Text(
-          _respostaDaIA ?? '',
+          _respostaDaIA ??
+              '', // <-- Aspas no texto e proteção contra null no lugar certo
           style: TextStyle(
-              fontSize: 14, color: getTextColor(context), height: 1.4),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            IconButton(
-                icon: Icon(Icons.thumb_up_alt_outlined,
-                    color: getSecondaryTextColor(context)),
-                onPressed: () {}),
-            IconButton(
-                icon: Icon(Icons.thumb_down_alt_outlined,
-                    color: getSecondaryTextColor(context)),
-                onPressed: () {}),
-            IconButton(
-                icon: Icon(Icons.bookmark_border,
-                    color: getSecondaryTextColor(context)),
-                onPressed: () {}),
-          ],
+            fontSize: 14,
+            color: getTextColor(context),
+            height: 1.4,
+          ),
         ),
       ],
     );

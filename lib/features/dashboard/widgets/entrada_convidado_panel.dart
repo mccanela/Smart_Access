@@ -557,12 +557,16 @@ class _EntradaConvidadoPanelState extends State<_EntradaConvidadoPanel> {
           // Para AV, fechar o painel após entrada
           // Para AG, atualizar lista e manter painel aberto
           if (isAvulso) {
+            // Mostrar feedback ANTES de fechar o painel para garantir
+            // que o context ainda está montado quando o toast é exibido
+            if (mounted) {
+              FeedbackUtils.showSuccess(
+                context: context,
+                title: 'Sucesso',
+                message: 'Entrada avulsa registrada com sucesso!',
+              );
+            }
             fecharPainelLateralGlobal();
-            FeedbackUtils.showSuccess(
-              context: context,
-              title: 'Sucesso',
-              message: 'Entrada avulsa registrada com sucesso!',
-            );
           } else {
             // No modo Agendamentos, atualizar lista e manter painel aberto
             final reservaconvidadoId =
@@ -578,11 +582,13 @@ class _EntradaConvidadoPanelState extends State<_EntradaConvidadoPanel> {
               fecharPainelLateralGlobal();
             }
 
-            FeedbackUtils.showSuccess(
-              context: context,
-              title: 'Sucesso',
-              message: 'Entrada registrada com sucesso!',
-            );
+            if (mounted) {
+              FeedbackUtils.showSuccess(
+                context: context,
+                title: 'Sucesso',
+                message: 'Entrada registrada com sucesso!',
+              );
+            }
           }
         } else {
           FeedbackUtils.showError(
@@ -601,15 +607,19 @@ class _EntradaConvidadoPanelState extends State<_EntradaConvidadoPanel> {
         );
       }
     } catch (e) {
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro',
-        message: 'Erro: $e',
-      );
+      if (mounted) {
+        FeedbackUtils.showError(
+          context: context,
+          title: 'Erro',
+          message: 'Erro: $e',
+        );
+      }
     } finally {
-      setState(() {
-        _salvando = false;
-      });
+      if (mounted) {
+        setState(() {
+          _salvando = false;
+        });
+      }
     }
   }
 
@@ -660,12 +670,30 @@ class _EntradaConvidadoPanelState extends State<_EntradaConvidadoPanel> {
           reservaId, reservaconvidadoId, false);
 
       if (sucesso) {
+        // Mostrar feedback ANTES de fechar o painel (context ainda válido)
+        if (mounted) {
+          FeedbackUtils.showSuccess(
+            context: context,
+            title: 'Saída registrada',
+            message: 'Saída registrada com sucesso!',
+          );
+        }
         fecharPainelLateralGlobal();
+      } else {
+        if (mounted) {
+          FeedbackUtils.showError(
+            context: context,
+            title: 'Erro',
+            message: 'Não foi possível registrar a saída. Tente novamente.',
+          );
+        }
       }
     } catch (e) {
       print('Erro ao registrar saída: $e');
-      FeedbackUtils.showError(
-          context: context, title: 'Erro', message: 'Erro ao registrar saída');
+      if (mounted) {
+        FeedbackUtils.showError(
+            context: context, title: 'Erro', message: 'Erro ao registrar saída');
+      }
     } finally {
       if (mounted) {
         setState(() {

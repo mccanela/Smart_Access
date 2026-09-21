@@ -2243,8 +2243,14 @@ class _RegistroDispositivosPageState extends State<RegistroDispositivosPage> {
       final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
       final tokenSessao =
           encryptedToken.isNotEmpty ? decryptText(encryptedToken) : '';
+      // Obter condominio_id e placa
+      final encryptedCondominioId = prefs.getString('condominio_id') ?? '';
+      final condominioId = encryptedCondominioId.isNotEmpty
+          ? decryptText(encryptedCondominioId)
+          : '';
 
-      final url = Uri.parse('${ApiConfig.gateUrl}/TipoDispositivo');
+      final url = Uri.parse(
+          '${ApiConfig.gateUrl}/TipoEquipamento/?condominio_id=$condominioId');
 
       final response = await http.post(
         url,
@@ -2261,67 +2267,13 @@ class _RegistroDispositivosPageState extends State<RegistroDispositivosPage> {
         if (tiposData != null) {
           List<Map<String, dynamic>> tiposFiltrados = [];
 
-          try {
-            // Tentar diferentes estruturas de resposta
-            if (_isPessoa) {
-              tiposFiltrados = List<Map<String, dynamic>>.from(
-                  tiposData['pessoas'] ?? tiposData['lista'] ?? []);
-            } else {
-              tiposFiltrados = List<Map<String, dynamic>>.from(
-                  tiposData['veiculos'] ?? tiposData['lista'] ?? []);
-            }
-
-            // Se não encontrou arrays específicos, tentar usar o array geral
-            if (tiposFiltrados.isEmpty) {
-              tiposFiltrados = List<Map<String, dynamic>>.from(
-                  tiposData['lista'] ?? tiposData ?? []);
-            }
-          } catch (e) {
-            // Fallback: tentar usar qualquer lista disponível
-            tiposFiltrados = List<Map<String, dynamic>>.from(
-                tiposData['pessoas'] ??
-                    tiposData['veiculos'] ??
-                    tiposData['lista'] ??
-                    []);
-          }
+          tiposFiltrados = List<Map<String, dynamic>>.from(
+              tiposData['tipoEquipamento'] ?? []);
 
           //-----------------------------//
           // Filtrar dispositivos conforme o modo
           //-----------------------------//
           List<Map<String, dynamic>> dispositivosFinais = tiposFiltrados;
-          if (widget.modoVeiculo) {
-            dispositivosFinais = tiposFiltrados.where((d) {
-              final descricao = (d['descricao'] ?? '').toString().toLowerCase();
-              return descricao.contains('senha') ||
-                  descricao.contains('tag') ||
-                  descricao.contains('chaveiro') ||
-                  descricao.contains('controle');
-            }).toList();
-          } else if (widget.modoPrestadorVisitante) {
-            // Para prestadores e visitantes: apenas Biometria (Digital) e Facial
-            dispositivosFinais = tiposFiltrados.where((d) {
-              final descricao = (d['descricao'] ?? '').toString().toLowerCase();
-              return descricao.contains('facial') ||
-                  descricao.contains('digital') ||
-                  descricao.contains('biometria');
-            }).toList();
-          } else {
-            // Para moradores: apenas Biometria (Digital), Facial, Senha e Cartão
-            dispositivosFinais = tiposFiltrados.where((d) {
-              final descricao = (d['descricao'] ?? '').toString().toLowerCase();
-              return descricao.contains('facial') ||
-                  descricao.contains('câmera') ||
-                  descricao.contains('digital') ||
-                  descricao.contains('biometria') ||
-                  descricao.contains('senha') ||
-                  descricao.contains('cartão') ||
-                  descricao.contains('cartao') ||
-                  descricao.contains('controle') ||
-                  descricao.contains('rf-id') ||
-                  descricao.contains('rfid');
-            }).toList();
-          }
-          //-----------------------------//
 
           setState(() {
             dispositivos = dispositivosFinais;
@@ -3023,31 +2975,18 @@ class _RegistroDispositivosPageState extends State<RegistroDispositivosPage> {
       }
     }
 
-    print(
-        'Carregando foto do usuário - usuarioId: $usuarioId, condominioId: $condominioId');
-    print('Morador completo: ${widget.morador}');
-    print('Chaves disponíveis no morador: ${widget.morador.keys.toList()}');
-
-    if (usuarioId == null) {
-      print('❌ UsuarioId é null, não carregando foto');
-      print('Verifique se o objeto morador contém usuario_id ou id');
-      return;
-    }
-
     try {
       final prefs = await SharedPreferences.getInstance();
       final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
 
       final url = Uri.parse('${ApiConfig.gateUrl}/FotoListar');
-      print('URL da API FotoListar: $url');
 
       final payload = {
         "usuario_id": usuarioId,
         "tipoUSU": "USU",
         "condominio_id": condominioId,
       };
-
-      print('Payload FotoListar: $payload');
+      print('payload: ${payload}');
 
       final response = await http.post(
         url,
@@ -3057,8 +2996,6 @@ class _RegistroDispositivosPageState extends State<RegistroDispositivosPage> {
         },
         body: jsonEncode(payload),
       );
-
-      print('Resposta da API FotoListar - Status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
@@ -3517,11 +3454,10 @@ class _RegistroDispositivosPageState extends State<RegistroDispositivosPage> {
                                       if (valor != null) {
                                         final descricao =
                                             _getDescricaoDispositivo(valor);
-                                        if (descricao == 'Facial') {
+
+                                        if (descricao == 'FACIAL') {
                                           // Desconectar Control ID se estava conectado
                                           if (_controlIdService != null) {
-                                            await _controlIdService!
-                                                .disconnect();
                                             _controlIdSession = null;
                                             _biometriaAcessoBase64 = null;
                                             _biometriaPanicoBase64 = null;
@@ -3533,8 +3469,6 @@ class _RegistroDispositivosPageState extends State<RegistroDispositivosPage> {
                                         } else {
                                           // Desconectar Control ID se mudou para outro tipo
                                           if (_controlIdService != null) {
-                                            await _controlIdService!
-                                                .disconnect();
                                             _controlIdSession = null;
                                             _biometriaAcessoBase64 = null;
                                             _biometriaPanicoBase64 = null;
@@ -3625,11 +3559,14 @@ class _RegistroDispositivosPageState extends State<RegistroDispositivosPage> {
                                   _logs.clear();
                                 });
 
-                                // Carregar foto do usuário quando selecionar dispositivo facial
+// Carregar foto do usuário quando selecionar dispositivo facial
                                 if (valor != null) {
                                   final descricao =
-                                      _getDescricaoDispositivo(valor);
-                                  if (descricao == 'Facial') {
+                                      _getDescricaoDispositivo(valor)
+                                              ?.toLowerCase() ??
+                                          '';
+
+                                  if (descricao.contains('facial')) {
                                     // Desconectar Control ID se estava conectado
                                     if (_controlIdService != null) {
                                       await _controlIdService!.disconnect();
@@ -3638,7 +3575,8 @@ class _RegistroDispositivosPageState extends State<RegistroDispositivosPage> {
                                       _biometriaPanicoBase64 = null;
                                     }
                                     await _carregarFotoUsuario();
-                                  } else if (descricao == 'Digital') {
+                                  } else if (descricao.contains('digital') ||
+                                      descricao.contains('biometria')) {
                                     // Conectar ao Control ID quando selecionar Digital
                                     await _conectarControlId();
                                   } else {

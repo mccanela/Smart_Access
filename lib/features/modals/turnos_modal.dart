@@ -168,13 +168,17 @@ class _RangeCalendarDialogState extends State<RangeCalendarDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // ADICIONADO: Pega a largura da tela para ajustar o modal
+    final screenWidth = MediaQuery.of(context).size.width;
+
     return Dialog(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
       backgroundColor: getBackgroundColor(context),
       child: Container(
-        width: 400,
+        // MODIFICADO: Se a tela for menor que 450, ocupa 90% da tela, senão crava em 400
+        width: screenWidth < 450 ? screenWidth * 0.9 : 400,
         height: 500,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -1024,6 +1028,9 @@ class _TurnosScreenState extends State<TurnosScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Detectar se é uma tela de celular
+    final isMobile = MediaQuery.of(context).size.width < 800;
+
     return Container(
       decoration: BoxDecoration(
         color: getBackgroundColor(context),
@@ -1044,17 +1051,32 @@ class _TurnosScreenState extends State<TurnosScreen> {
             onClose: widget.onClose,
           ),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: _buildNovoTurnoPanel()),
-                  const SizedBox(width: 24),
-                  Expanded(child: _buildHistoricoPanel()),
-                ],
-              ),
-            ),
+            child: isMobile
+                // 📱 NO MOBILE: Usa Scroll e remove os Expanded
+                ? SingleChildScrollView(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildNovoTurnoPanel(), // Sem Expanded
+                        const SizedBox(height: 16),
+                        _buildHistoricoPanel(
+                            isMobile: true), // Sem Expanded e passa flag
+                      ],
+                    ),
+                  )
+                // 💻 NO DESKTOP: Mantém lado a lado e com Expanded
+                : Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: _buildNovoTurnoPanel()),
+                        const SizedBox(width: 24),
+                        Expanded(child: _buildHistoricoPanel(isMobile: false)),
+                      ],
+                    ),
+                  ),
           ),
         ],
       ),
@@ -1332,42 +1354,47 @@ class _TurnosScreenState extends State<TurnosScreen> {
                         const SizedBox(height: 16),
 
                         // Buttons
+// Buttons
                         Align(
                           alignment: Alignment.centerRight,
-                          child: _buildTransparentIconGroup(
-                            context,
-                            [
-                              {
-                                'icon': Icons.close,
-                                'color': IconColors.delete(context),
-                                'tooltip': 'Cancelar',
-                                'onPressed': _cancelarConfirmacao,
-                              },
-                              {
-                                'key': _registrarTurnoKey,
-                                'icon': Icons.check,
-                                'color': Colors.green,
-                                'tooltip': 'Confirmar',
-                                'onPressed': () => _executarRegistroTurno(
-                                    _saiuOutroHorario
-                                        ? _horarioSelecionado
-                                        : DateTime.now(),
-                                    logout: false),
-                                'isLoading': _loadingRegistro,
-                              },
-                              {
-                                'key': _confirmarLoginKey,
-                                'icon': Icons.logout,
-                                'color': const Color(0xFF684F8E),
-                                'tooltip': 'Confirmar e fazer novo login',
-                                'onPressed': () => _executarRegistroTurno(
-                                    _saiuOutroHorario
-                                        ? _horarioSelecionado
-                                        : DateTime.now(),
-                                    logout: true),
-                                'isLoading': _loadingRegistro,
-                              },
-                            ],
+                          child: SingleChildScrollView(
+                            // ADICIONADO: Permite rolagem horizontal se não couber
+                            scrollDirection: Axis.horizontal,
+                            child: _buildTransparentIconGroup(
+                              context,
+                              [
+                                {
+                                  'icon': Icons.close,
+                                  'color': IconColors.delete(context),
+                                  'tooltip': 'Cancelar',
+                                  'onPressed': _cancelarConfirmacao,
+                                },
+                                {
+                                  'key': _registrarTurnoKey,
+                                  'icon': Icons.check,
+                                  'color': Colors.green,
+                                  'tooltip': 'Confirmar',
+                                  'onPressed': () => _executarRegistroTurno(
+                                      _saiuOutroHorario
+                                          ? _horarioSelecionado
+                                          : DateTime.now(),
+                                      logout: false),
+                                  'isLoading': _loadingRegistro,
+                                },
+                                {
+                                  'key': _confirmarLoginKey,
+                                  'icon': Icons.logout,
+                                  'color': const Color(0xFF684F8E),
+                                  'tooltip': 'Confirmar e fazer novo login',
+                                  'onPressed': () => _executarRegistroTurno(
+                                      _saiuOutroHorario
+                                          ? _horarioSelecionado
+                                          : DateTime.now(),
+                                      logout: true),
+                                  'isLoading': _loadingRegistro,
+                                },
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -1405,7 +1432,8 @@ class _TurnosScreenState extends State<TurnosScreen> {
     );
   }
 
-  Widget _buildHistoricoPanel() {
+// Adicionado o parâmetro isMobile
+  Widget _buildHistoricoPanel({bool isMobile = false}) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1415,6 +1443,8 @@ class _TurnosScreenState extends State<TurnosScreen> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        // No mobile, a Column não pode ter tamanho ilimitado
+        mainAxisSize: isMobile ? MainAxisSize.min : MainAxisSize.max,
         children: [
           Row(
             children: [
@@ -1465,93 +1495,115 @@ class _TurnosScreenState extends State<TurnosScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          Expanded(
-            child: _loadingHistorico
-                ? const Center(child: CircularProgressIndicator())
+
+          // Tratamento da lista de histórico
+          if (isMobile)
+            // No Mobile: A lista ocupa o espaço que precisar (shrinkWrap) sem o Expanded
+            _loadingHistorico
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: CircularProgressIndicator()))
                 : _historicoTurnos.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.schedule,
-                                size: 48,
-                                color: getSecondaryTextColor(context)),
-                            const SizedBox(height: 8),
-                            Text('Sem turnos registrados',
-                                style: TextStyle(
-                                    color: getSecondaryTextColor(context),
-                                    fontSize: 14)),
-                          ],
-                        ),
-                      )
+                    ? _buildEmptyState()
                     : ListView.builder(
+                        shrinkWrap: true, // Importante para o mobile
+                        physics:
+                            const NeverScrollableScrollPhysics(), // Scroll quem faz é o pai
                         itemCount: _historicoTurnos.length,
-                        itemBuilder: (context, index) {
-                          final item = _historicoTurnos[index];
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            decoration: BoxDecoration(
-                              color: getCardColor(context),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                  color: getBorderColor(context), width: 1),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item['dt_saida'] ??
-                                        item['dt_entrada'] ??
-                                        item['dt_ocorrencia'] ??
-                                        'Data não informada',
-                                    style: TextStyle(
-                                      color: getSecondaryTextColor(context),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  // Novo posto (Entrada)
-                                  Text(
-                                    'Novo posto:',
-                                    style: TextStyle(
-                                      color: getSecondaryTextColor(context),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    item['nome_entrada'] ??
-                                        item['usuario_atende_nome'] ??
-                                        'Usuário não informado',
-                                    style: TextStyle(
-                                      color: getTextColor(context),
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  if (item['observacao']?.isNotEmpty ==
-                                      true) ...[
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      item['observacao'],
-                                      style: TextStyle(
-                                        color: getSecondaryTextColor(context),
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-          ),
+                        itemBuilder: _buildHistoricoItem,
+                      )
+          else
+            // No Desktop: Usa Expanded normalmente
+            Expanded(
+              child: _loadingHistorico
+                  ? const Center(child: CircularProgressIndicator())
+                  : _historicoTurnos.isEmpty
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          itemCount: _historicoTurnos.length,
+                          itemBuilder: _buildHistoricoItem,
+                        ),
+            ),
         ],
+      ),
+    );
+  }
+
+  // Extraí o "Empty State" para não repetir código
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.schedule, size: 48, color: getSecondaryTextColor(context)),
+          const SizedBox(height: 8),
+          Text('Sem turnos registrados',
+              style: TextStyle(
+                  color: getSecondaryTextColor(context), fontSize: 14)),
+        ],
+      ),
+    );
+  }
+
+  // Extraí o item da lista para não repetir código
+  Widget _buildHistoricoItem(BuildContext context, int index) {
+    final item = _historicoTurnos[index];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: getCardColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: getBorderColor(context), width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              item['dt_saida'] ??
+                  item['dt_entrada'] ??
+                  item['dt_ocorrencia'] ??
+                  'Data não informada',
+              style: TextStyle(
+                color: getSecondaryTextColor(context),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Novo posto:',
+              style: TextStyle(
+                color: getSecondaryTextColor(context),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              item['nome_entrada'] ??
+                  item['usuario_atende_nome'] ??
+                  'Usuário não informado',
+              style: TextStyle(
+                color: getTextColor(context),
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+            if (item['observacao']?.isNotEmpty == true) ...[
+              const SizedBox(height: 8),
+              Text(
+                item['observacao'],
+                style: TextStyle(
+                  color: getSecondaryTextColor(context),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
