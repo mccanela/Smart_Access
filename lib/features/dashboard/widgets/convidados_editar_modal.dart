@@ -26,11 +26,13 @@ class EditarConvidadoModal extends StatefulWidget {
 }
 
 class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
+  late TextEditingController _documentoController;
   late TextEditingController _nomeController;
   late TextEditingController _modeloController;
   late TextEditingController _placaController;
   late TextEditingController _obsController;
 
+  final FocusNode _documentoFocusNode = FocusNode();
   final FocusNode _nomeFocusNode = FocusNode();
   final FocusNode _modeloFocusNode = FocusNode();
   final FocusNode _placaFocusNode = FocusNode();
@@ -43,11 +45,21 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
   String? _fotoRostoEntrada;
   bool _isLoading = false;
 
+  bool _isErrorsalvar = false;
+  String? _mensagemSalvar;
+
   @override
   void initState() {
     super.initState();
     final c = widget.convidado;
 
+    String documentoValue = c['documento'].toString();
+
+    if (documentoValue == "Não Informado") {
+      documentoValue = "";
+    }
+
+    _documentoController = TextEditingController(text: (documentoValue));
     _nomeController =
         TextEditingController(text: c['nome'] ?? c['convidado_txt'] ?? '');
     _modeloController = TextEditingController(
@@ -90,10 +102,13 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
 
   @override
   void dispose() {
+    _documentoController.dispose();
     _nomeController.dispose();
     _modeloController.dispose();
     _placaController.dispose();
     _obsController.dispose();
+
+    _documentoFocusNode.dispose();
     _nomeFocusNode.dispose();
     _modeloFocusNode.dispose();
     _placaFocusNode.dispose();
@@ -155,8 +170,42 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
     }
   }
 
+  bool _validarFormulario() {
+    final doc = _documentoController.text.trim();
+
+    // Valida o Documento
+    if (doc.isEmpty || doc.toLowerCase() == "não informado") {
+      FeedbackUtils.showWarning(
+        context: context,
+        title: 'Atenção',
+        message: 'O preenchimento do Documento é obrigatório.',
+      );
+      return false; // Interrompe a execução
+    }
+
+    // Aproveitamos para mover a validação do Nome para cá, centralizando tudo!
+    if (_nomeController.text.trim().isEmpty) {
+      FeedbackUtils.showWarning(
+        context: context,
+        title: 'Atenção',
+        message: 'Preencha o Nome do convidado.',
+      );
+      return false; // Interrompe a execução
+    }
+
+    return true; // Tudo certo, pode seguir!
+  }
+
   Map<String, dynamic> _getDadosAtualizados() {
     final dados = Map<String, dynamic>.from(widget.convidado);
+
+    final doc = _documentoController.text.trim();
+    if (doc.toLowerCase() == "não informado") {
+      dados['documento'] = "";
+    } else {
+      dados['documento'] = doc;
+    }
+
     dados['nome'] = _nomeController.text.trim();
     dados['modelo'] = _modeloController.text.trim();
     dados['placa'] = _placaController.text.trim();
@@ -165,8 +214,9 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
 
     if (_selectedMarca != null) dados['marca_id'] = _selectedMarca!['id'];
     if (_selectedCor != null) dados['cor_id'] = _selectedCor!['id'];
-    if (_selectedVaga != null)
+    if (_selectedVaga != null) {
       dados['vaga_id'] = _selectedVaga!['id'] ?? _selectedVaga!['vaga_id'];
+    }
 
     return dados;
   }
@@ -185,6 +235,20 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
             .toString();
     bool jaDeuEntrada = entradaStr.isNotEmpty;
     bool jaDeuSaida = saidaStr.isNotEmpty;
+
+    String documentoValue = (widget.convidado['documento'] ??
+            widget.convidado['documento_txt'] ??
+            '')
+        .toString();
+
+    if (documentoValue == "Não Informado") {
+      documentoValue = "";
+    }
+
+    // Identifica no build() se é um novo convidado
+    final isNovo = documentoValue == "" ||
+        (widget.convidado['reservaconvidado_id'] == 0) ||
+        (widget.convidado['id'] == 0);
 
     return Container(
       padding: const EdgeInsets.only(top: 8),
@@ -275,6 +339,60 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // CAMPO DOCUMENTO CONDICIONAL
+                  isNovo
+                      ? CharacterCounterField(
+                          controller: _documentoController,
+                          maxLength: 14,
+                          labelText: 'Documento',
+                          focusNode: _documentoFocusNode,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(fontSize: 16),
+                          decoration: inputDecorationPadrao(context,
+                              hintText: 'Documento'),
+                        )
+                      : Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: getBorderColor(context)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Informe o Documento',
+                                style: TextStyle(
+                                  color: getSecondaryTextColor(context),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                documentoValue,
+                                style: TextStyle(
+                                  // 👇 Cor mais clara (estilo placeholder) se estiver vazio
+                                  color: documentoValue.isNotEmpty
+                                      ? getTextColor(context)
+                                      : getSecondaryTextColor(context)
+                                          .withValues(alpha: 0.6),
+                                  fontSize: 16,
+                                  // 👇 Tira o negrito se for o placeholder
+                                  fontWeight: documentoValue.isNotEmpty
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                  const SizedBox(height: 12),
+
                   CharacterCounterField(
                     controller: _nomeController,
                     maxLength: 50,
@@ -476,9 +594,44 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
                         onPressed: _isLoading
                             ? null
                             : () async {
-                                setState(() => _isLoading = true);
-                                await widget.onSalvar(_getDadosAtualizados());
-                                setState(() => _isLoading = false);
+                                // 1. Valida o formulário antes de prosseguir
+                                if (!_validarFormulario()) return;
+
+                                setState(() {
+                                  _isLoading = true;
+                                  _isErrorsalvar = false;
+                                  _mensagemSalvar = null;
+                                });
+                                try {
+                                  final dadosAtualizados =
+                                      _getDadosAtualizados();
+
+                                  // 2. Chama a API de atualização diretamente de dentro do modal
+                                  await ConvidadosApi
+                                      .AtualizarConvidadoAgendamento(
+                                          dadosAtualizados);
+
+                                  setState(() {
+                                    _isErrorsalvar = false;
+                                    _mensagemSalvar =
+                                        'Dados do convidado salvos com sucesso!';
+                                  });
+
+                                  // 3. Chama o callback do Dashboard apenas para atualizar a tela
+                                  await widget.onSalvar(dadosAtualizados);
+
+                                  //fecharPainelLateralGlobal();
+                                } catch (e) {
+                                  // 👇 Exibe o erro na própria tela em vez do popup
+                                  setState(() {
+                                    _isErrorsalvar = true;
+                                    _mensagemSalvar = e
+                                        .toString()
+                                        .replaceAll('Exception: ', '');
+                                  });
+                                } finally {
+                                  setState(() => _isLoading = false);
+                                }
                               },
                       ),
                       if (jaDeuEntrada && !jaDeuSaida)
@@ -491,6 +644,7 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
                           onPressed: _isLoading
                               ? null
                               : () async {
+                                  if (!_validarFormulario()) return;
                                   setState(() => _isLoading = true);
                                   await widget.onSaida(_getDadosAtualizados());
                                   setState(() => _isLoading = false);
@@ -506,6 +660,7 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
                           onPressed: _isLoading
                               ? null
                               : () async {
+                                  if (!_validarFormulario()) return;
                                   if (_nomeController.text.trim().isEmpty) {
                                     FeedbackUtils.showWarning(
                                         context: context,
@@ -531,6 +686,33 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
                         ),
                     ]),
                   ),
+                  if (_mensagemSalvar != null && _mensagemSalvar!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          _isErrorsalvar
+                              ? const Icon(Icons.error_outline,
+                                  color: Colors.red, size: 16)
+                              : const Icon(Icons.save_outlined,
+                                  color: Colors.green, size: 16),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _mensagemSalvar!,
+                              style: TextStyle(
+                                color:
+                                    _isErrorsalvar ? Colors.red : Colors.green,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              textAlign: TextAlign.right,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),

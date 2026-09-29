@@ -665,7 +665,67 @@ class _AlertasScreenState extends State<AlertasScreen> {
             maxLines: 5,
             controller: _descricaoController,
           ),
-          const SizedBox(height: 24),
+
+          // 👇 NOVO: Elemento de Preview da Foto Anexada
+          if (_fotoAlerta != null) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    height: 220,
+                    width: 220,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: getBorderColor(context),
+                        width: 2,
+                      ),
+                      image: DecorationImage(
+                        image: MemoryImage(_fotoAlerta!),
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: -8,
+                    right: -8,
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _fotoAlerta = null;
+                          _extensaoFoto = null;
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.3),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          // 👆 FIM DO NOVO PREVIEW
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
@@ -688,7 +748,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
                   {
                     'icon': Symbols.photo_camera,
                     'color': IconColors.camera(context),
-                    'tooltip': 'Capturar foto',
+                    'tooltip': 'Anexar foto',
                     'onPressed': _capturarFoto,
                     'isLoading': false,
                   },
@@ -910,6 +970,39 @@ class _AlertasScreenState extends State<AlertasScreen> {
                                               ),
                                             ),
                                           ),
+                                        // 👇 NOVO: Exibição da foto recebida em fotobase64
+                                        if (alerta['fotobase64'] != null &&
+                                            alerta['fotobase64']
+                                                .toString()
+                                                .isNotEmpty)
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(top: 12),
+                                            child: ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              child: Image.memory(
+                                                base64Decode(
+                                                    alerta['fotobase64']
+                                                            .toString()
+                                                            .contains(',')
+                                                        ? alerta['fotobase64']
+                                                            .toString()
+                                                            .split(',')
+                                                            .last
+                                                        : alerta['fotobase64']
+                                                            .toString()),
+                                                height: 250,
+                                                width: double.infinity,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (context, error,
+                                                        stackTrace) =>
+                                                    const SizedBox
+                                                        .shrink(), // Oculta caso a imagem seja inválida
+                                              ),
+                                            ),
+                                          ),
+                                        // 👆 FIM DA NOVO EXIBIÇÃO
                                       ],
                                     ),
                                   ),

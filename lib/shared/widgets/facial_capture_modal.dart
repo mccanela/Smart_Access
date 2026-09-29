@@ -107,6 +107,9 @@ class _FacialCaptureModalState extends State<FacialCaptureModal> {
   bool _isLoadingEquipamentos = true;
   String? _selectedFonte;
 
+// 👇 ADICIONE ESTA LINHA AQUI
+  String? _mensagemErro;
+
   bool isDarkMode(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark;
   Color getBackgroundColor(BuildContext context) =>
@@ -290,9 +293,13 @@ class _FacialCaptureModalState extends State<FacialCaptureModal> {
     }
   }
 
-  // NOVA CHAMADA LIMPA: _dispararAtualizacaoIns
   Future<void> _dispararAtualizacaoIns() async {
     if (_selectedFonte == null || _selectedFonte == 'webcam') return;
+
+    // 👇 Limpa qualquer erro anterior ao tentar novamente
+    setState(() {
+      _mensagemErro = null;
+    });
 
     try {
       showDialog(
@@ -318,14 +325,13 @@ class _FacialCaptureModalState extends State<FacialCaptureModal> {
         Navigator.of(context).pop();
       }
     } catch (e) {
-      if (_mounted)
+      if (_mounted) {
         Navigator.of(context).pop(); // Fecha o loading em caso de erro
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro',
-        message: 'Falha ao comunicar com o equipamento.',
-        errorDetails: e.toString(),
-      );
+        // 👇 Exibe o erro na própria tela, abaixo do botão
+        setState(() {
+          _mensagemErro = 'Falha ao comunicar com o equipamento.';
+        });
+      }
     }
   }
 
@@ -766,7 +772,32 @@ class _FacialCaptureModalState extends State<FacialCaptureModal> {
                 borderRadius: BorderRadius.circular(20),
               ),
             ),
-          )
+          ),
+
+          // 👇 ADICIONE ESTE BLOCO LOGO ABAIXO DO BOTÃO 👇
+          if (_mensagemErro != null && _mensagemErro!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      _mensagemErro!,
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          // 👆 FIM DO BLOCO 👇
         ],
       ),
     );

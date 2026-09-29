@@ -20,6 +20,7 @@ import '../../shared/widgets/inline_period_picker.dart';
 import '../../shared/widgets/inline_single_date_picker.dart';
 import '../dashboard/widgets/segmented_tab_bar.dart';
 import '../../shared/widgets/filter_tab.dart';
+import '../../core/theme/cupertino_colors_service.dart';
 
 // Componente RangeCalendarDialog estilo ShadCalendar
 class RangeCalendarDialog extends StatefulWidget {
@@ -675,6 +676,7 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
   List<Map<String, dynamic>> _unidades = [];
   List<Map<String, dynamic>> _historicoOcorrencias = [];
   Map<String, dynamic>? _unidadeSelecionada;
+  Map<String, dynamic>? _filtroUnidadeSelecionada;
   DateTime? _filtroDataInicio;
   DateTime? _filtroDataFim;
   DateTime? _dataOcorrencia;
@@ -802,7 +804,7 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
                   .onFocusRequested(); // <--- AVISA O DASHBOARD QUE FOI CLICADO
               setState(() => _tabOcorrencias = i);
             },
-            color: const Color.fromARGB(204, 234, 177, 7),
+            color: CupertinoColorsService.tabBar4,
           ),
           const SizedBox(height: 10),
           Expanded(
@@ -822,7 +824,7 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
           'Nova Ocorrência', // Você pode mudar para 'Filtros de Ocorrência' se preferir
       themeColor: const Color(0xFFF59E0B), // Amarelo da aba Ocorrências
       icon: Icons.tune,
-      initiallyExpanded: false,
+      initiallyExpanded: true,
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1129,10 +1131,21 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
                       option['id']?.toString() ??
                       'Sem nome',
                   onSelected: (Map<String, dynamic> value) {
-                    // Implementar filtro por unidade se necessário
+                    setState(() {
+                      _filtroUnidadeSelecionada = value;
+                    });
                   },
                   fieldViewBuilder: (context, textEditingController, focusNode,
                       onFieldSubmitted) {
+                    // Mantém o texto sincronizado caso o widget seja reconstruído
+                    if (_filtroUnidadeSelecionada != null &&
+                        textEditingController.text.isEmpty) {
+                      textEditingController.text =
+                          _filtroUnidadeSelecionada!['unidade_mostra'] ??
+                              _filtroUnidadeSelecionada!['unidade_ds'] ??
+                              _filtroUnidadeSelecionada!['nome'] ??
+                              '';
+                    }
                     return CharacterCounterField(
                       controller: textEditingController,
                       focusNode: focusNode,
@@ -1147,6 +1160,10 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
                                     color: getSecondaryTextColor(context)),
                                 onPressed: () {
                                   textEditingController.clear();
+                                  setState(() {
+                                    _filtroUnidadeSelecionada =
+                                        null; // Limpa o estado
+                                  });
                                 },
                               )
                             : const Icon(Icons.arrow_drop_down,
@@ -1234,14 +1251,6 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
                     context,
                     [
                       {
-                        'icon': Icons.search,
-                        'color': IconColors.search(context),
-                        'tooltip': 'Buscar',
-                        'onPressed': () {
-                          _carregarHistorico();
-                        },
-                      },
-                      {
                         'icon': Symbols.ink_eraser,
                         'color': IconColors.delete(context),
                         'tooltip': 'Limpar filtros',
@@ -1249,7 +1258,16 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
                           setState(() {
                             _filtroDataInicio = null;
                             _filtroDataFim = null;
+                            _filtroUnidadeSelecionada = null;
                           });
+                          _carregarHistorico();
+                        },
+                      },
+                      {
+                        'icon': Icons.search,
+                        'color': IconColors.search(context),
+                        'tooltip': 'Buscar',
+                        'onPressed': () {
                           _carregarHistorico();
                         },
                       },
@@ -1657,17 +1675,27 @@ class _OcorrenciasScreenState extends State<OcorrenciasScreen> {
             "${_filtroDataFim!.day.toString().padLeft(2, '0')}/${_filtroDataFim!.month.toString().padLeft(2, '0')}/${_filtroDataFim!.year}";
       }
 
+      final Map<String, dynamic> payload = {
+        "condominio_id": int.tryParse(condominioId) ?? 0,
+        "data": dataInicio,
+        "data_fim": dataFim,
+      };
+
+      // Adiciona o filtro de unidade apenas se houver uma selecionada
+      if (_filtroUnidadeSelecionada != null) {
+        // Atenção: substitua 'apto_id' pela chave exata que a sua API de histórico espera (pode ser 'unidade_id' ou 'apto_id')
+        payload["apto_id"] = _filtroUnidadeSelecionada!['id'] ??
+            _filtroUnidadeSelecionada!['apto_id'] ??
+            0;
+      }
+
       final response = await http.post(
         url,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $tokenSessao',
         },
-        body: jsonEncode({
-          "condominio_id": int.tryParse(condominioId) ?? 0,
-          "data_inicio": dataInicio,
-          "data_fim": dataFim,
-        }),
+        body: jsonEncode(payload),
       );
 
       if (response.statusCode == 200) {

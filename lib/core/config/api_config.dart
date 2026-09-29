@@ -82,7 +82,6 @@ class ApiConfig {
         'agendamentos': '$socialhUrl/Agendamentolist',
         'convidados': '$socialhUrl/convidadolist',
         'veiculos': '$gateUrl/veiculosmarcacor',
-        // Lista de veículos por unidade (apto_id)
         'veiculosUnidade': '$gateUrl/veiculolist',
         'cadastroAvulso': '$gateUrl/cadastroavulsolist/',
         'avulsoSelecionado': '$gateUrl/avulsoselecionado',
@@ -94,14 +93,6 @@ class ApiConfig {
         'buscaentrada': '$gateUrl/buscaentrada',
         'passagemUsuarioUpd': '$gateUrl/passagemusuarioupd',
         'ConectConIAPortaria': '$gateUrl/ConectConIAPortaria',
-      },
-      'encomendas': {
-        'imagem': '$gateUrl/encomendaimagem',
-        'unidades': '$gateUrl/encomendaunidadelist',
-        'registrar': '$gateUrl/encomendaregistrar',
-        'lista': '$gateUrl/encomendalist',
-        'entrega': '$gateUrl/encomendaentrega',
-        'reenvioEntrega': '$gateUrl/reenvioentrega',
       },
       'unidade': {
         'foto': '$socialhUrl/unidadefoto',
@@ -133,6 +124,7 @@ class ApiConfig {
         'atualizar': '$socialhUrl/convidadoupd/',
         'entrada': '$socialhUrl/convidadomov/',
         'saida': '$socialhUrl/convidadomov/',
+        'entradasaida': '$socialhUrl/ConvidadoEntradaSaida/',
         'listarestricao': '$gateUrl/negra_lista/',
       },
     };

@@ -230,7 +230,7 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
       } else {
         FeedbackUtils.showWarning(
           context: context,
-          title: 'Erro na API',
+          title: 'Erro de conexão com NOVIA-X ',
           message: 'Código de erro: ${response.statusCode}',
         );
         setState(() {
@@ -241,7 +241,7 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
     } catch (e) {
       FeedbackUtils.showWarning(
         context: context,
-        title: 'Erro de conexão',
+        title: 'Erro de conexão com NOVIA-X',
         message: 'Não foi possível conectar com a IA.',
       );
       setState(() {

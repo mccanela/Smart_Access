@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/crypto_utils.dart';
 import '../../core/config/api_config.dart';
 import '../../core/services/feedback_utils.dart';
+import '../../core/theme/cupertino_colors_service.dart';
+
 import 'services/reference_data_service.dart';
 import 'services/delivery_pdf_service.dart';
 import '../../features/unidades/unidade_detalhe_screen.dart'
@@ -35,6 +37,8 @@ import '../../shared/widgets/inline_single_date_picker.dart';
 import '../../shared/widgets/filter_tab.dart';
 import '../../core/utils/ui_standards.dart';
 import '../../core/services/signalr_service.dart';
+import '../../core/services/convidados_api.dart';
+
 import '../../core/utils/file_download/file_download.dart';
 
 import '../../shared/widgets/character_counter_field.dart';
@@ -51,6 +55,7 @@ import 'widgets/standard_autocomplete.dart';
 import 'widgets/mini_segmented.dart';
 import 'widgets/transparent_icon_group.dart';
 import 'widgets/dashboard_small_widgets.dart';
+import '../modals/passagens_modal.dart'; // 👈 Ajuste o path se necessário
 
 part 'widgets/range_calendar_dialog.dart';
 part 'widgets/painel_selecao_convidados.dart';
@@ -185,10 +190,6 @@ void Function() fecharPainelLateralGlobal = () {
   // Funçao padrão - será sobrescrita quando o painel for criado
 };
 
-// Funçao global para abrir painel lateral
-//-----------------------------//
-// Funçao global para abrir painel lateral
-//-----------------------------//
 void Function(Widget) abrirPainelLateralGlobal = (Widget painel) {
   // Funçao padrão vazia - será sobrescrita quando o Dashboard for construído
 };
@@ -208,6 +209,243 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void setState(VoidCallback fn) {
     if (!mounted) return;
     super.setState(fn);
+  }
+
+// -------------------------------------------------------------
+  // VARIÁVEIS EXCLUSIVAS DO MODAL DE PASSAGENS
+  // -------------------------------------------------------------
+  final TextEditingController _filtroNomeModalController =
+      TextEditingController();
+  final TextEditingController _filtroDocumentoModalController =
+      TextEditingController();
+  final TextEditingController _filtroPlacaModalController =
+      TextEditingController();
+  DateTime? _filtroDataInicioModal;
+  DateTime? _filtroDataFimModal;
+  Map<String, dynamic>? _selectedUnidadeModal;
+  int? _filtroAptoIdModal;
+  List<Map<String, dynamic>> _historicoFiltradoModal = [];
+  bool _loadingModal = false;
+  final Set<String> _loadingActionKeys = {};
+  Future<void> _buscarHistoricoModal(
+      void Function(void Function()) setPanelState) async {
+    setPanelState(() {
+      _loadingModal = true;
+      _historicoFiltradoModal = [];
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final tokenSessao = decryptText(prefs.getString('tokensessao_txt') ?? '');
+      final condominioId = decryptText(prefs.getString('condominio_id') ?? '');
+
+      final url =
+          Uri.parse(ApiConfig.getEndpoint('dashboard', 'historicoPassagem'));
+
+      final payload = {
+        "apto_id": _filtroAptoIdModal ?? 0,
+        "condominio_id": int.tryParse(condominioId) ?? 0,
+        "nome": _filtroNomeModalController.text.trim(),
+        "documento": _filtroDocumentoModalController.text.trim(),
+        "placa": _filtroPlacaModalController.text.trim(),
+        "naosairam": false
+      };
+
+      if (_filtroDataInicioModal != null) {
+        final dIni = _filtroDataInicioModal!;
+        payload["dt_ini"] =
+            '${dIni.year}-${dIni.month.toString().padLeft(2, '0')}-${dIni.day.toString().padLeft(2, '0')} 00:00:00';
+      }
+
+      if (_filtroDataFimModal != null) {
+        final dFim = _filtroDataFimModal!;
+        payload["dt_fim"] =
+            '${dFim.year}-${dFim.month.toString().padLeft(2, '0')}-${dFim.day.toString().padLeft(2, '0')} 23:59:59';
+      }
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $tokenSessao',
+        },
+        body: jsonEncode(payload),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final historico = List<Map<String, dynamic>>.from(data['data'] ?? []);
+
+        historico.sort((a, b) {
+          final dataA = _parseDateTime(
+                  a['data']?.toString() ?? a['dt_ini']?.toString() ?? '') ??
+              DateTime(2000);
+          final dataB = _parseDateTime(
+                  b['data']?.toString() ?? b['dt_ini']?.toString() ?? '') ??
+              DateTime(2000);
+          return dataB.compareTo(dataA);
+        });
+
+        setPanelState(() {
+          _historicoFiltradoModal = historico;
+          _loadingModal = false;
+        });
+      } else {
+        setPanelState(() => _loadingModal = false);
+      }
+    } catch (e) {
+      setPanelState(() => _loadingModal = false);
+    }
+  }
+
+  Widget _buildPassagemCard(Map<String, dynamic> passagem, int index) {
+    final destino = passagem['destino'] ?? '';
+    final nome = (passagem['nome'] ?? 'Visitante').toString();
+    final tipo_visita = (passagem['tipo_visita'] ?? '').toString();
+    String tipo_visita_ds = "Visitante";
+    if (tipo_visita == "P") {
+      tipo_visita_ds = "Prestador Serviço";
+    }
+
+    final leitor = (passagem['leitor_ds'] ?? '').toString();
+    final data =
+        (passagem['dt_entrada'] ?? passagem['dt_ini'] ?? '').toString();
+    final dtSaidaStr =
+        (passagem['dt_saida'] ?? passagem['saida'] ?? '').toString();
+
+    final itemKey = 'pass_${passagem['id'] ?? index}';
+    return _buildStandardCard(
+      uniqueKey: itemKey,
+      context: context,
+      title: nome,
+      subtitle: '${destino.isNotEmpty ? destino : ' '} - $tipo_visita_ds',
+      photoBase64: (passagem['link_foto'] ?? passagem['foto'])?.toString(),
+      actions: const [],
+      extraContent: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (leitor.isNotEmpty && leitor != '-')
+            Text(
+              leitor,
+              style: TextStyle(
+                fontSize: 12,
+                color: getSecondaryTextColor(context),
+              ),
+            ),
+          if (data.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2.0),
+              child: Text(
+                'E: $data',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.green,
+                ),
+              ),
+            ),
+          if (dtSaidaStr.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2.0),
+              child: Text(
+                'S: $dtSaidaStr',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: CupertinoColorsService.systemRed,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _abrirPainelPesquisaPassagens() {
+    abrirPainelLateralGlobal(
+      StatefulBuilder(builder: (context, setPanelState) {
+        return PassagensModal(
+          onClose: () => fecharPainelLateralGlobal(),
+          documentoController: _filtroDocumentoModalController,
+          nomeController: _filtroNomeModalController,
+          placaController: _filtroPlacaModalController,
+          onClear: () {
+            setPanelState(() {
+              _filtroNomeModalController.clear();
+              _filtroDocumentoModalController.clear();
+              _filtroPlacaModalController.clear();
+              _selectedUnidadeModal = null;
+              _filtroAptoIdModal = null;
+              _filtroDataInicioModal = null;
+              _filtroDataFimModal = null;
+              _historicoFiltradoModal.clear();
+            });
+          },
+          onSearch: () async {
+            await _buscarHistoricoModal(setPanelState);
+          },
+          isLoading: _loadingModal,
+          historicoFiltrado: _historicoFiltradoModal,
+          buildPassagemCard: _buildPassagemCard,
+          buildUnidadeAutocomplete: () {
+            return LayoutBuilder(builder: (context, constraints) {
+              return Stack(
+                alignment: Alignment.centerRight,
+                children: [
+                  buildStandardAutocomplete<Map<String, dynamic>>(
+                    key: const ValueKey('filtro_unidade_modal_panel'),
+                    context: context,
+                    labelText: 'Unidade',
+                    items: _unidadesList,
+                    itemAsString: (option) => unidadeLabelComMorador(option),
+                    selectedItem: _selectedUnidadeModal,
+                    onSelected: (value) {
+                      setPanelState(() {
+                        _selectedUnidadeModal = value;
+                        _filtroAptoIdModal = value != null
+                            ? (_convertToValidId(value['apto_id']) ??
+                                _convertToValidId(value['id']))
+                            : null;
+                      });
+                    },
+                    constraints: constraints,
+                  ),
+                  if (_selectedUnidadeModal != null)
+                    Positioned(
+                      right: 30,
+                      child: IconButton(
+                        icon: const Icon(Icons.close, size: 16),
+                        color: CupertinoColors.systemPink,
+                        onPressed: () {
+                          setPanelState(() {
+                            _selectedUnidadeModal = null;
+                            _filtroAptoIdModal = null;
+                          });
+                        },
+                      ),
+                    ),
+                ],
+              );
+            });
+          },
+          buildPeriodFilter: () {
+            return _buildPeriodFilter(
+              context: context,
+              startDate: _filtroDataInicioModal,
+              endDate: _filtroDataFimModal,
+              onStartDateChanged: (date) {
+                setPanelState(() {
+                  _filtroDataInicioModal = date;
+                });
+              },
+              onEndDateChanged: (date) {
+                setPanelState(() {
+                  _filtroDataFimModal = date;
+                });
+              },
+            );
+          },
+        );
+      }),
+    );
   }
 
   Widget? _buildContador(
@@ -675,6 +913,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _filtroUnidadeSelecionado;
   Uint8List? _fotoTiradaMorador;
 
+  Map<String, dynamic>? _selectedUnidadeHistorico;
+  int? _filtroAptoIdHistorico;
+
   // Estado para cartões expandidos (Nova Entrada Avulso)
   final Set<String> _cardsExpandidos = {};
   final Map<String, Map<String, dynamic>> _unidadeSelecionadaAvulso = {};
@@ -905,8 +1146,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'tipo': 'A', // Agendamento
         'reserva_id': reservaId,
         'reservaconvidado_id': reservaconvidadoId,
-        'usuario_registro': int.tryParse(usuarioId.toString()) ?? 0,
-        'dt_entrada': formattedDate,
+        'usuario_registro': int.tryParse(usuarioId.toString()) ?? 0
       };
 
       print('Payload convidadomov (Re-entrada): $payloadMov');
@@ -1639,19 +1879,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     // APIs essenciais que precisam funcionar na abertura da tela
-    await _buscarHistoricoFiltrado(false);
+
     await _fetchAutorizantes();
     await _fetchMarcasECoresVeiculo();
     await _fetchVagasAvulso();
     await _fetchCrachas();
     await _fetchUnidadesFiltro(); // Carregar unidades para filtro de entrada
     await _fetchEspacosSocial(); // Carregar espaá§os sociais para filtro de entrada
-    await _fetchHistoricos();
+    //await _fetchHistoricos();
     await _fetchAgendamentos();
     await _fetchVeiculos();
     await _fetchVagas();
     await _checkBotoeiras();
-
+    await _buscarSaidasFiltradas();
     // Equipamentos carregados pelo EquipamentosFAB widget
 
     // Listener para atualizar UI quando documento muda
@@ -1976,7 +2216,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _todasPassagens.clear();
     _passagens.clear();
     _historicoFiltrado.clear();
-
+    _filtroNomeModalController.dispose();
+    _filtroDocumentoModalController.dispose();
+    _filtroPlacaModalController.dispose();
     super.dispose();
   }
 
@@ -2029,7 +2271,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: const [
               TextSpan(
                 text: ' *',
-                style: TextStyle(color: Colors.red),
+                style: TextStyle(color: CupertinoColorsService.systemRed),
               ),
             ],
           ),
@@ -2212,7 +2454,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               BorderRadius.circular(isActive ? 16 : 8),
                           color: isActive
                               ? (index == 0
-                                  ? const Color(0xFF7C4DFF)
+                                  ? CupertinoColors.systemIndigo
                                       .withValues(alpha: 0.15)
                                   : const Color(0xFF4CAF50)
                                       .withValues(alpha: 0.15))
@@ -2220,7 +2462,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           border: Border.all(
                             color: isActive
                                 ? (index == 0
-                                    ? const Color(0xFF7C4DFF)
+                                    ? CupertinoColors.systemIndigo
                                     : const Color(0xFF4CAF50))
                                 : Colors.grey.shade400,
                             width: 1,
@@ -2234,7 +2476,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     pageIcons[index],
                                     size: 14,
                                     color: index == 0
-                                        ? const Color(0xFF7C4DFF)
+                                        ? CupertinoColors.systemIndigo
                                         : const Color(0xFF4CAF50),
                                   ),
                                   const SizedBox(width: 4),
@@ -2245,7 +2487,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         fontSize: 11,
                                         fontWeight: FontWeight.w500,
                                         color: index == 0
-                                            ? const Color(0xFF7C4DFF)
+                                            ? CupertinoColors.systemIndigo
                                             : const Color(0xFF4CAF50),
                                       ),
                                       overflow: TextOverflow.ellipsis,
@@ -2501,6 +2743,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         uniqueKey != null && _revealedPii.contains(uniqueKey);
 
     Widget buildImage() {
+      print('DEBUG: photoBase64: $photoBase64');
       if (photoBase64 != null &&
           photoBase64.isNotEmpty &&
           photoBase64 != 'null') {
@@ -2585,9 +2828,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 labels: const ['Avulso', 'Agendamentos', 'Saídas'],
                 tooltips: const [
                   'Entrada de avulsos',
-                  'Entrada de agendamentos',
+                  'Visitantes agendados pelo morador',
                   'Saída de prestadores e visitantes'
                 ],
+                color: CupertinoColorsService.tabBar1,
                 selected: _tabAvulsoAgendamentosSaidas,
                 //hasFocus: _grupoEmFoco == 'EntradaSaidas',
                 hasFocus: false,
@@ -2602,7 +2846,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _grupoEmFoco = 'EntradaSaidas'; // <- ADICIONE AQUI
                     if (i == 2) {
                       // Saídas - carregar API passagemhistorico
-                      _fetchPassagens(true);
+                      _buscarSaidasFiltradas();
                     } else {
                       // Avulso (0) ou Agendamentos (1)
                       // Limpar todos os campos ao trocar entre Avulso e Agendamentos
@@ -2624,37 +2868,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _unidadeAgendamento = null;
                       _convidadosResultados.clear();
                       _cardsExpandidos.clear();
-                      if (i == 1) {
-                        _fetchAgendamentos(isFiltro: false);
-                      }
+
                       _tipoFiltroEntrada = i;
-                      // Limpar seleá§ões de espaá§os sociais ao mudar de tipo
                       if (i == 0) {
-                        _filtroEntradaMinimizado =
-                            false; // Mostrar filtros no modo Avulso
+                        _filtroEntradaMinimizado = false;
+                      }
+
+                      if (i == 1) {
+                        final espacosSelecionados =
+                            _espacosSocialList.where((espaco) {
+                          final id = espaco['espacopublico_id'] as int? ?? 0;
+                          return _espacosSociaisSelecionadosFiltro[id] == true;
+                        }).toList();
+                        final espacosParaBusca = espacosSelecionados.isNotEmpty
+                            ? espacosSelecionados
+                            : _espacosSocialList;
+                        _buscarAgendamentosEntradaFiltrados(
+                            espacosSelecionados: espacosParaBusca);
+                      }
+
+                      _filtroEntradaMinimizado = false;
+                      // Ao mudar para agendamentos, carregar espaá§os sociais se ainda não foram carregados
+                      if (_espacosSocialList.isEmpty &&
+                          !_loadingEspacosSocial) {
+                        _buscarEspacosSociaisParaFiltro();
                       } else {
-                        _filtroEntradaMinimizado =
-                            false; // Expandir no modo Agendamentos
-                        // Ao mudar para agendamentos, carregar espaá§os sociais se ainda não foram carregados
-                        if (_espacosSocialList.isEmpty &&
-                            !_loadingEspacosSocial) {
-                          _buscarEspacosSociaisParaFiltro();
-                        } else {
-                          // Se já foram carregados, apenas marcar todos os cards como selecionados
-                          setState(() {
-                            _espacosSociaisSelecionadosFiltro.clear();
-                            for (final espaco in _espacosSocialList) {
-                              final id =
-                                  espaco['espacopublico_id'] as int? ?? 0;
-                              _espacosSociaisSelecionadosFiltro[id] = true;
-                            }
-                          });
-                        }
+                        // Se já foram carregados, apenas marcar todos os cards como selecionados
+                        setState(() {
+                          _espacosSociaisSelecionadosFiltro.clear();
+                          for (final espaco in _espacosSocialList) {
+                            final id = espaco['espacopublico_id'] as int? ?? 0;
+                            _espacosSociaisSelecionadosFiltro[id] = true;
+                          }
+                        });
                       }
                     }
                   });
                 },
-                color: const Color(0xFF00C853),
               ),
 
               const SizedBox(height: 12),
@@ -2737,7 +2987,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _grupoEmFoco = 'Passagens';
                   });
                 },
-                color: const Color(0xFF2196F3), // Azul padrão
+                color: CupertinoColorsService.tabBar2, // Azul padrão
               ),
               const SizedBox(height: 12),
               _passagensHistoricoContent(),
@@ -2827,11 +3077,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   convidadoBase['id_filho']?.toString() ??
                   '0') ??
           0;
-
+      String tit_modal = "Novo Convidado";
       if (reservaId > 0 && reservaconvidadoId > 0) {
         final completo =
             await _obterConvidadoCompleto(reservaId, reservaconvidadoId);
         if (completo != null) convidado = {...convidadoBase, ...completo};
+        tit_modal = "Editar Convidado";
       }
 
       if (!mounted) return;
@@ -2847,97 +3098,184 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       if (!mounted) return;
 
-      abrirPainelLateralGlobal(Container(
-        width: MediaQuery.of(context).size.width * 0.4,
-        color: getBackgroundColor(context),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Editar Convidado',
-                    style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: getTextColor(context))),
-                IconButton(
-                    icon: Icon(Icons.close, color: getTextColor(context)),
-                    onPressed: () => fecharPainelLateralGlobal())
-              ],
+      abrirPainelLateralGlobal(
+        ScaffoldMessenger(
+          child: Navigator(
+            onGenerateRoute: (settings) => PageRouteBuilder(
+              opaque: false,
+              pageBuilder: (painelCtx, _, __) => Material(
+                // 👈 Capturamos um novo contexto (painelCtx)
+                color: Colors.transparent,
+                child: Container(
+                  width: MediaQuery.of(context).size.width * 0.4,
+                  color: getBackgroundColor(context),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        color: CupertinoColorsService.systemBlue,
+                        padding: const EdgeInsets.all(20),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.contact_page,
+                                    color: Colors.white, size: 24),
+                                const SizedBox(width: 12),
+                                Text(tit_modal,
+                                    style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white)),
+                              ],
+                            ),
+                            IconButton(
+                                icon: const Icon(Icons.close,
+                                    color: Colors.white),
+                                onPressed: () => fecharPainelLateralGlobal())
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                          child: EditarConvidadoModal(
+                              convidado: convidado,
+                              marcasList: _marcasList,
+                              coresList: _coresList,
+                              vagasList: _vagasAvulsoList,
+                              onSalvar: (dadosAtualizados) async {
+                                // Recarrega a lista do agendamento
+                                final rId = dadosAtualizados['reserva_id']
+                                        ?.toString() ??
+                                    dadosAtualizados['id_pai']?.toString() ??
+                                    '';
+
+                                if (rId.isNotEmpty) {
+                                  final convidados =
+                                      await ConvidadosApi.ConvidadosList(rId);
+
+                                  // Atualiza a variável local para a tela piscar com o novo nome
+                                  setState(() {
+                                    dadosAtualizados[rId] = convidados;
+                                    _convidadosPorReserva[rId] = convidados;
+                                    _quantidadeConvidados[rId] =
+                                        convidados.length;
+                                    convidadoBase['nome'] =
+                                        dadosAtualizados['nome'];
+                                    convidadoBase['documento'] =
+                                        dadosAtualizados['documento'];
+                                    convidadoBase['documento_txt'] =
+                                        dadosAtualizados['documento'];
+                                    convidadoBase['modelo'] =
+                                        dadosAtualizados['modelo'];
+                                    convidadoBase['placa'] =
+                                        dadosAtualizados['placa'];
+                                    convidadoBase['observacao'] =
+                                        dadosAtualizados['observacao'];
+                                    if (dadosAtualizados['foto'] != null) {
+                                      convidadoBase['foto'] =
+                                          dadosAtualizados['foto'];
+                                    }
+                                  });
+                                }
+                              },
+                              onEntrada: (dadosAtualizados) async {
+                                final tipo = dadosAtualizados['tipo']
+                                    ?.toString()
+                                    .toUpperCase();
+                                if (tipo == 'AG' || tipo == 'AG_EMPTY') {
+                                  bool isNovaEntrada =
+                                      (dadosAtualizados['entrada'] ?? '')
+                                              .toString()
+                                              .isEmpty &&
+                                          (dadosAtualizados['saida'] ?? '')
+                                              .toString()
+                                              .isEmpty;
+                                  if (isNovaEntrada) {
+                                    await _registrarPrimeiraEntradaAgendamento(
+                                        dadosAtualizados);
+                                  } else {
+                                    await _realizarEntradaDireta(
+                                        dadosAtualizados);
+                                  }
+
+                                  final rId = dadosAtualizados['reserva_id']
+                                          ?.toString() ??
+                                      dadosAtualizados['id_pai']?.toString() ??
+                                      '';
+                                  if (rId.isNotEmpty) {
+                                    final convidados =
+                                        await ConvidadosApi.ConvidadosList(rId);
+
+                                    setState(() {
+                                      dadosAtualizados[rId] = convidados;
+                                      _convidadosPorReserva[rId] = convidados;
+                                      _quantidadeConvidados[rId] =
+                                          convidados.length;
+                                      convidadoBase.addAll(dadosAtualizados);
+                                    });
+                                    _buscarHistoricoFiltrado(false);
+                                    fecharPainelLateralGlobal();
+                                  }
+                                }
+                              },
+                              onSaida: (dadosAtualizados) async {
+                                final rId = dadosAtualizados['reserva_id']
+                                        ?.toString() ??
+                                    dadosAtualizados['id_pai']?.toString() ??
+                                    '';
+                                final rcId =
+                                    dadosAtualizados['reservaconvidado_id']
+                                            ?.toString() ??
+                                        dadosAtualizados['id_filho']
+                                            ?.toString() ??
+                                        dadosAtualizados['id']?.toString() ??
+                                        '';
+
+                                if (rId.isEmpty || rcId.isEmpty) {
+                                  FeedbackUtils.showError(
+                                      context:
+                                          painelCtx, // 👈 USAMOS O NOVO CONTEXTO AQUI
+                                      title: 'Erro',
+                                      message: 'IDs não encontrados');
+                                  return;
+                                }
+
+                                final success =
+                                    await registrarEntradaSaidaGlobal(
+                                        rId, rcId, false);
+                                if (success) {
+                                  FeedbackUtils.showSuccess(
+                                      context:
+                                          painelCtx, // 👈 USAMOS O NOVO CONTEXTO AQUI
+                                      title: 'Sucesso',
+                                      message: 'Saída registrada!');
+                                  if (rId.isNotEmpty) {
+                                    final convidados =
+                                        await ConvidadosApi.ConvidadosList(rId);
+                                    setState(() {
+                                      _convidadosPorReserva[rId] = convidados;
+                                      _quantidadeConvidados[rId] =
+                                          convidados.length;
+                                      dadosAtualizados[rId] = convidados;
+                                      convidadoBase.addAll(dadosAtualizados);
+                                    });
+                                    fecharPainelLateralGlobal();
+                                  }
+                                }
+                              }),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
-            const SizedBox(height: 16),
-            // INSTANCIAMOS O NOVO WIDGET AQUI!
-            Expanded(
-                child: EditarConvidadoModal(
-                    convidado: convidado,
-                    marcasList: _marcasList,
-                    coresList: _coresList,
-                    vagasList: _vagasAvulsoList,
-                    onSalvar: (dadosAtualizados) async {
-                      // Caso precise, a lógica de atualizar no banco roda aqui
-                      fecharPainelLateralGlobal();
-                    },
-                    onEntrada: (dadosAtualizados) async {
-                      final tipo =
-                          dadosAtualizados['tipo']?.toString().toUpperCase();
-                      if (tipo == 'AG' || tipo == 'AG_EMPTY') {
-                        bool isNovaEntrada = (dadosAtualizados['entrada'] ?? '')
-                                .toString()
-                                .isEmpty &&
-                            (dadosAtualizados['saida'] ?? '')
-                                .toString()
-                                .isEmpty;
-                        if (isNovaEntrada) {
-                          await _registrarPrimeiraEntradaAgendamento(
-                              dadosAtualizados);
-                        } else {
-                          await _realizarEntradaDireta(dadosAtualizados);
-                        }
-
-                        final rId =
-                            dadosAtualizados['reserva_id']?.toString() ??
-                                dadosAtualizados['id_pai']?.toString() ??
-                                '';
-                        if (rId.isNotEmpty) _fetchConvidadosAgendamento(rId);
-
-                        fecharPainelLateralGlobal();
-                        _buscarHistoricoFiltrado(false);
-                      }
-                    },
-                    onSaida: (dadosAtualizados) async {
-                      final rId = dadosAtualizados['reserva_id']?.toString() ??
-                          dadosAtualizados['id_pai']?.toString() ??
-                          '';
-                      final rcId =
-                          dadosAtualizados['reservaconvidado_id']?.toString() ??
-                              dadosAtualizados['id_filho']?.toString() ??
-                              dadosAtualizados['id']?.toString() ??
-                              '';
-
-                      if (rId.isEmpty || rcId.isEmpty) {
-                        FeedbackUtils.showError(
-                            context: context,
-                            title: 'Erro',
-                            message: 'IDs não encontrados');
-                        return;
-                      }
-
-                      final success =
-                          await registrarEntradaSaidaGlobal(rId, rcId, false);
-                      if (success) {
-                        FeedbackUtils.showSuccess(
-                            context: context,
-                            title: 'Sucesso',
-                            message: 'Saída registrada!');
-                        if (rId.isNotEmpty) _fetchConvidadosAgendamento(rId);
-                        fecharPainelLateralGlobal();
-                      }
-                    })),
-          ],
+          ),
         ),
-      ));
+      );
     }
 
     List<IconActionData> construirAcoes(Map<String, dynamic> convidado,
@@ -2964,7 +3302,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             IconActionData(
               icon: Icons.login_rounded,
               tooltip: 'Dar Entrada Rápida',
-              color: const Color(0xFF00C853), // Verde de destaque
+              color: CupertinoColorsService.activeGreen, // Verde de destaque
               isMarked:
                   true, // 👈 CORREÇÃO: isMarked deixa o fundo preenchido e chamativo!
               isOpaque:
@@ -3042,9 +3380,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       Color borderColor = getBorderColor(context);
       if (temRestricao)
-        borderColor = Colors.red.shade700;
+        borderColor = CupertinoColorsService.destructiveRed;
       else if (temErroFoto)
-        borderColor = Colors.red;
+        borderColor = CupertinoColorsService.systemRed;
       else if (jaDeuEntrada && !jaDeuSaida)
         borderColor = Colors.orange;
       else if (jaDeuEntrada && jaDeuSaida) borderColor = Colors.green;
@@ -3070,7 +3408,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           boxShadow: [
             BoxShadow(
                 color: temRestricao
-                    ? Colors.red.withOpacity(0.15)
+                    ? CupertinoColorsService.systemRed.withOpacity(0.15)
                     : Colors.black.withValues(alpha: 0.04),
                 blurRadius: 10,
                 offset: const Offset(0, 4)),
@@ -3085,7 +3423,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 padding:
                     const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
                 decoration: BoxDecoration(
-                    color: Colors.red.shade700,
+                    color: CupertinoColorsService.destructiveRed,
                     borderRadius: const BorderRadius.only(
                         topLeft: Radius.circular(10),
                         topRight: Radius.circular(10))),
@@ -3184,8 +3522,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   style: TextStyle(
                                       color: temRestricao
                                           ? (isDark
-                                              ? Colors.red.shade300
-                                              : Colors.red.shade900)
+                                              ? CupertinoColors.systemPink
+                                              : CupertinoColorsService
+                                                  .destructiveRed)
                                           : getTextColor(context),
                                       fontSize: 14,
                                       fontWeight: FontWeight.bold,
@@ -3308,7 +3647,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   _cardsExpandidos.remove(uniqueKey);
                                 });
                               },
-                              color: Colors.red),
+                              color: CupertinoColorsService.systemRed),
                           IconActionData(
                             icon: Icons.check,
                             tooltip: 'Confirmar Entrada',
@@ -3371,8 +3710,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               Icon(Icons.error_outline,
                                   size: 16,
                                   color: isDark
-                                      ? Colors.red.shade300
-                                      : Colors.red.shade800),
+                                      ? CupertinoColors.systemPink
+                                      : CupertinoColorsService.destructiveRed),
                               const SizedBox(width: 4),
                               Flexible(
                                   child: Text('Motivo: $motivolista_ds',
@@ -3380,8 +3719,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                           color: isDark
-                                              ? Colors.red.shade300
-                                              : Colors.red.shade900,
+                                              ? CupertinoColors.systemPink
+                                              : CupertinoColorsService
+                                                  .destructiveRed,
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600)))
                             ])
@@ -3396,7 +3736,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   padding: const EdgeInsets.only(top: 8, bottom: 8),
                   child: Text('Foto obrigatória para entrada!',
                       style: TextStyle(
-                          color: Colors.red.shade700,
+                          color: CupertinoColorsService.destructiveRed,
                           fontWeight: FontWeight.bold))),
           ],
         ),
@@ -3409,6 +3749,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           convidado['reserva_id']?.toString() ??
           convidado['pessoadocumento_id']?.toString() ??
           '';
+      final entradaKey = '${uniqueKey}_entrada';
+      final saidaKey = '${uniqueKey}_saida';
 
       final reservaId = convidado['reserva_id']?.toString() ?? '';
       final reservaconvidadoId =
@@ -3426,82 +3768,80 @@ class _DashboardScreenState extends State<DashboardScreen> {
         } catch (e) {}
       }
 
-      final bool temRestricao =
-          (dadosAtualizados?['lista_restricao'] ?? convidado['lista_restricao'])
-                  ?.toString()
-                  .toUpperCase() ==
-              'S';
-      final motivolista_ds =
-          (dadosAtualizados?['motivolista_ds'] ?? convidado['motivolista_ds'])
-                  ?.toString() ??
-              '';
-
-      final nome = dadosAtualizados?['nome'] ??
-          dadosAtualizados?['convidado_txt'] ??
-          convidado['nome'] ??
-          'Nome não informado';
-
-      final documento = dadosAtualizados?['documento'] ??
-          dadosAtualizados?['documento_txt'] ??
-          convidado['documento'] ??
-          convidado['documento_txt'] ??
-          '';
-
-      String? fotoParaExibir = dadosAtualizados?['link_foto']?.toString() ??
-          convidado['link_foto']?.toString();
-      if (fotoParaExibir == null ||
-          fotoParaExibir.isEmpty ||
-          fotoParaExibir == 'null') {
-        fotoParaExibir = dadosAtualizados?['foto']?.toString() ??
-            convidado['foto']?.toString();
+      // 👇 CORREÇÃO AQUI: Faça o merge ANTES de ler as variáveis e dar os prints!
+      if (dadosAtualizados != null) {
+        convidado.addAll(dadosAtualizados);
       }
+      final objetoAcao = convidado; // Mantém a referência
+
+      final bool temRestricao =
+          convidado['lista_restricao']?.toString().toUpperCase() == 'S';
+      final motivolista_ds = convidado['motivolista_ds']?.toString() ?? '';
+
+      final nome = convidado['nome'] ??
+          convidado['convidado_txt'] ??
+          'Nome não informado';
+      final documento =
+          convidado['documento'] ?? convidado['documento_txt'] ?? '';
+
+      String? fotoParaExibir =
+          convidado['link_foto']?.toString() ?? convidado['foto']?.toString();
       if (fotoParaExibir == 'null') fotoParaExibir = null;
 
       final temErroFoto = _cardsComErroFoto.contains(uniqueKey);
 
-      final entradaStr = (dadosAtualizados?['entrada'] ??
-              dadosAtualizados?['dt_entrada'] ??
-              convidado['entrada'] ??
-              convidado['dt_entrada'] ??
-              '')
-          .toString();
-      final saidaStr = (dadosAtualizados?['saida'] ??
-              dadosAtualizados?['dt_saida'] ??
-              convidado['saida'] ??
-              convidado['dt_saida'] ??
-              '')
-          .toString();
+      // 👇 AGORA SIM, ESTAMOS LENDO DO OBJETO JÁ ATUALIZADO COM OS DADOS NOVOS!
+      final entradaStr =
+          (convidado['dt_entrada'] ?? convidado['entrada'] ?? '').toString();
+      final saidaStr =
+          (convidado['dt_saida'] ?? convidado['saida'] ?? '').toString();
 
       bool jaDeuEntrada = entradaStr.isNotEmpty;
       bool jaDeuSaida = saidaStr.isNotEmpty;
 
-      final objetoAcao = dadosAtualizados != null
-          ? {...convidado, ...dadosAtualizados}
-          : convidado;
+      print('----------------------------------------------------------');
+      print('reservaId $reservaId');
+      print('nome $nome');
+      print('documento $documento');
+      print('foto $fotoParaExibir');
+      print('entrada $entradaStr');
+      print('saida $saidaStr');
+      print('temRestricao $temRestricao');
+      print('motivolista_ds $motivolista_ds');
+
+      // 👇 CORREÇÃO: Atualizamos a referência original em vez de criar um clone!
+      if (dadosAtualizados != null) {
+        convidado.addAll(dadosAtualizados);
+      }
 
       Color photoBorderColor = Colors.transparent;
       if (temRestricao)
-        photoBorderColor = Colors.red.shade700;
+        photoBorderColor = CupertinoColorsService.destructiveRed;
       else if (temErroFoto)
-        photoBorderColor = Colors.red;
+        photoBorderColor = CupertinoColorsService.systemRed;
       else if (jaDeuEntrada && !jaDeuSaida)
-        photoBorderColor = Colors.orange;
-      else if (jaDeuEntrada && jaDeuSaida) photoBorderColor = Colors.green;
+        photoBorderColor = Colors.orange; // 👈 Agora vai funcionar!
+      else if (jaDeuEntrada && jaDeuSaida) photoBorderColor = Colors.green; //
 
-// ---------------------------------------------------------
-      // CONSTRUÇÃO DA PÍLULA
-      // ---------------------------------------------------------
       Widget buildPillBtn(IconData icon, Color color, String tooltipMessage,
-          VoidCallback? onPressed) {
+          VoidCallback? onPressed,
+          {bool isLoading = false}) {
         return Tooltip(
           message: tooltipMessage,
           child: InkWell(
-            onTap: onPressed,
+            onTap: isLoading ? null : onPressed, // Previne duplo clique
             borderRadius: BorderRadius.circular(20),
             child: Padding(
               padding:
                   const EdgeInsets.symmetric(horizontal: 10.0, vertical: 6.0),
-              child: Icon(icon, color: color, size: 22),
+              child: isLoading
+                  ? SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: color),
+                    )
+                  : Icon(icon, color: color, size: 22),
             ),
           ),
         );
@@ -3515,6 +3855,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
         abrirEdicaoNoPainel(objetoAcao);
       }));
 
+      // 👇 NOVA LÓGICA DE BOTÕES DE ENTRADA E SAÍDA DIRETOS NO LAYOUT
+      if (!jaDeuEntrada || (jaDeuEntrada && jaDeuSaida)) {
+        pillBtns.add(buildPillBtn(Icons.login_rounded,
+            CupertinoColorsService.activeGreen, 'Dar Entrada', () async {
+          setState(() {
+            _loadingActionKeys.add(entradaKey);
+          });
+          try {
+            await _realizarEntradaDireta(objetoAcao);
+            final rId = objetoAcao['reserva_id']?.toString() ??
+                objetoAcao['id_pai']?.toString() ??
+                '';
+            if (rId.isNotEmpty) {
+              final convidados = await _getConvidadosComMovimentacao(rId);
+              setState(() {
+                _convidadosPorReserva[rId] = convidados;
+                _quantidadeConvidados[rId] = convidados.length;
+              });
+            }
+          } finally {
+            setState(() {
+              _loadingActionKeys.remove(entradaKey);
+            });
+          }
+        }, isLoading: _loadingActionKeys.contains(entradaKey) // Passa o status
+            ));
+      } else if (jaDeuEntrada && !jaDeuSaida) {
+        pillBtns.add(buildPillBtn(
+            Icons.logout, CupertinoColorsService.systemRed, 'Dar Saída',
+            () async {
+          setState(() {
+            _loadingActionKeys.add(saidaKey);
+          });
+          try {
+            final rId = objetoAcao['reserva_id']?.toString() ??
+                objetoAcao['id_pai']?.toString() ??
+                '';
+            final rcId = objetoAcao['reservaconvidado_id']?.toString() ??
+                objetoAcao['id_filho']?.toString() ??
+                objetoAcao['id']?.toString() ??
+                '';
+
+            if (rId.isNotEmpty && rcId.isNotEmpty) {
+              final success =
+                  await registrarEntradaSaidaGlobal(rId, rcId, false);
+              if (success) {
+                FeedbackUtils.showSuccess(
+                    context: context,
+                    title: 'Sucesso',
+                    message: 'Saída registrada!');
+                final convidados = await _getConvidadosComMovimentacao(rId);
+
+                setState(() {
+                  _convidadosPorReserva[rId] = convidados;
+                  _quantidadeConvidados[rId] = convidados.length;
+                });
+                _buscarHistoricoFiltrado(false);
+              }
+            }
+          } finally {
+            setState(() {
+              _loadingActionKeys.remove(saidaKey);
+            });
+          }
+        }, isLoading: _loadingActionKeys.contains(saidaKey) // Passa o status
+            ));
+      }
       final pillWidget = Container(
         decoration: BoxDecoration(
           // Fundo alterado para branco para destacar no fundo cinza
@@ -3542,36 +3949,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       }
 
-      // ---------------------------------------------------------
-
       return Padding(
         padding: const EdgeInsets.only(top: 8.0, bottom: 8.0, left: 16.0),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment
+              .center, // 👈 GARANTE ALINHAMENTO VERTICAL NO CENTRO
           children: [
-            // 2. NOME E DOCUMENTO
+            // 2. NOME, DOCUMENTO E MENSAGENS DE ERRO
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize:
+                    MainAxisSize.min, // 👈 OCUPA APENAS O ESPAÇO NECESSÁRIO
                 children: [
                   GestureDetector(
                     onTap: () =>
                         setState(() => _revealedPii.add('${uniqueKey}_nome')),
                     child: Text(
-                      _revealedPii.contains('${uniqueKey}_nome')
-                          ? nome
-                          : _maskName(nome),
+                      _revealedPii.contains('${uniqueKey}_nome') ? nome : nome,
                       style: TextStyle(
                         color: temRestricao
                             ? (isDark
-                                ? Colors.red.shade300
-                                : Colors.red.shade900)
+                                ? CupertinoColors.systemPink
+                                : CupertinoColorsService.destructiveRed)
                             : getTextColor(context),
-                        fontSize: 15,
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
-                      maxLines: 1,
+                      maxLines: 1, // 👈 IMPEDE QUEBRA DE LINHA DO NOME
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -3585,29 +3990,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             : _maskDocument(documento),
                         style: TextStyle(
                             color: getSecondaryTextColor(context),
-                            fontSize: 13),
+                            fontSize: 14),
+                        maxLines: 1, // 👈 IMPEDE QUEBRA DE LINHA DO DOCUMENTO
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  if (temRestricao && motivolista_ds.isNotEmpty)
-                    Text('Restrição: $motivolista_ds',
-                        style: TextStyle(
-                            color: Colors.red.shade700,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                  if (temErroFoto)
-                    Text('Foto obrigatória!',
-                        style: TextStyle(
-                            color: Colors.red.shade700,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold)),
+                  // Seção de Feedback (Restrições e Erros)
+                  if ((temRestricao && motivolista_ds.isNotEmpty) ||
+                      temErroFoto)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2.0),
+                      child: Row(
+                        // 👈 COLOCA AS MENSAGENS EM LINHA PARA NÃO EMPURRAR O CARD
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (temRestricao && motivolista_ds.isNotEmpty)
+                            Flexible(
+                              child: Text(
+                                'Restrição: $motivolista_ds',
+                                style: TextStyle(
+                                    color:
+                                        CupertinoColorsService.destructiveRed,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          if (temRestricao &&
+                              motivolista_ds.isNotEmpty &&
+                              temErroFoto)
+                            const SizedBox(width: 8),
+                          if (temErroFoto)
+                            Text(
+                              'Foto obrigatória!',
+                              style: TextStyle(
+                                  color: CupertinoColorsService.destructiveRed,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
 
             // 3. PILL MENU DE AÇÕES
+            // Ocultamos a pílula se o nome for apenas "Não Informado" ou equivalente
+            // para evitar interações inválidas, mas a pílula agora ficará alinhada perfeitamente ao centro!
             pillWidget,
           ],
         ),
@@ -3639,12 +4071,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // Agrupa por Espaço/Data dentro da Unidade
           final Map<String, List<Map<String, dynamic>>> agrupadosPorEspaco = {};
           for (var c in convidadosDaUnidade) {
-            final espaco =
-                (c['reserva_tipo_txt'] ?? c['destino'] ?? 'Espaço').toString();
+            // 👇 CORREÇÃO: Resgata o nome do espaço de TODAS as fontes possíveis
+            final espaco = (c['reserva_tipo_txt'] ??
+                    c['reserva_tipo_ds'] ??
+                    c['destino'] ??
+                    c['espaco'] ??
+                    'Agendamento')
+                .toString();
+
             final dtIni = (c['reserva_dt_ini'] ?? c['dt_ini'] ?? '').toString();
             final dtFim = (c['reserva_dt_fim'] ?? c['dt_fim'] ?? '').toString();
             final reservaId = (c['reserva_id'] ?? c['id_pai'] ?? '').toString();
             final chave = '$espaco|$dtIni|$dtFim|$reservaId';
+
             if (!agrupadosPorEspaco.containsKey(chave)) {
               agrupadosPorEspaco[chave] = [];
             }
@@ -3743,7 +4182,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     base['reservaconvidado_id'] = 0;
                                     base['nome'] = '';
                                     base['documento'] = '';
-                                    base['tipo'] = 'AG_EMPTY';
+                                    base['tipo'] = 'AG';
 
                                     // Chama o painel lateral em modo de criação
                                     abrirEdicaoNoPainel(base);
@@ -3752,13 +4191,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 borderRadius: BorderRadius.circular(20),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 6),
+                                      horizontal: 10, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF00C853)
-                                        .withValues(alpha: 0.1),
+                                    color: CupertinoColorsService.white,
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
-                                      color: const Color(0xFF00C853)
+                                      color: CupertinoColorsService.activeGreen
                                           .withValues(alpha: 0.4),
                                     ),
                                   ),
@@ -3766,7 +4204,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Icon(Icons.add,
-                                          color: Color(0xFF00C853), size: 16),
+                                          color: Color(0xFF00C853), size: 22),
                                     ],
                                   ),
                                 ),
@@ -3875,10 +4313,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? const Color(0xFF00C853).withOpacity(0.15)
-                      : const Color(0xFF00C853).withOpacity(0.08),
+                      ? CupertinoColorsService.activeGreen.withOpacity(0.15)
+                      : CupertinoColorsService.activeGreen.withOpacity(0.08),
                   border: Border.all(
-                      color: const Color(0xFF00C853).withOpacity(0.15)),
+                      color:
+                          CupertinoColorsService.activeGreen.withOpacity(0.15)),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -4759,7 +5198,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 IconActionData(
                   icon: Symbols.close,
                   tooltip: 'Cancelar',
-                  color: Colors.red,
+                  color: CupertinoColorsService.systemRed,
                   onPressed: () {
                     _limparFormulario();
                     _fecharFormulario();
@@ -5243,206 +5682,70 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }).toList();
   }
 
-// Conteúdo das passagens (sem cabeçalho segmented)
   Widget _passagensHistoricoContent() {
     return Expanded(
       child: Column(
         children: [
-          // Filtros de histórico com o componente sanfona AZUL
-          FilterTab(
-            title: 'Filtros de Passagens',
-            themeColor: const Color(0xFF2196F3), // Azul da aba Passagens
-            icon: Icons.tune,
-            initiallyExpanded: false,
-            content: Column(
-              children: [
-                // Primeira linha: Documento (linha inteira)
-                Row(
-                  children: [
-                    Expanded(
-                      child: CharacterCounterField(
-                        controller: _filtroDocumentoHistoricoController,
-                        labelText: 'Documento',
-                        maxLength: 14,
-                        decoration: inputDecorationPadrao(context,
-                            hintText: 'Documento'),
-                        onSubmitted: (_) => _buscarHistoricoFiltrado(false),
-                      ),
+          // 👇 BOTÃO QUE SIMULA O CABEÇALHO DO FILTRO E ABRE O PAINEL LATERAL
+          RepaintBoundary(
+            key: const ValueKey('filtros_passagens'),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 12.0),
+              child: InkWell(
+                onTap: _abrirPainelPesquisaPassagens,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: CupertinoColorsService.tabBar2.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: CupertinoColorsService.tabBar2.withOpacity(0.3),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Segunda linha: Nome e Sobrenome (linha inteira)
-                Row(
-                  children: [
-                    Expanded(
-                      child: CharacterCounterField(
-                        controller: _filtroNomeHistoricoController,
-                        labelText: 'Nome e Sobrenome',
-                        maxLength: 50,
-                        decoration: inputDecorationPadrao(context,
-                            hintText: 'Nome e Sobrenome'),
-                        onSubmitted: (_) => _buscarHistoricoFiltrado(false),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.tune,
+                            color: CupertinoColorsService.tabBar2,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Histórico de passagens',
+                            style: TextStyle(
+                              color: CupertinoColorsService.tabBar2,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                // Terceira linha: Unidade e Placa
-                Row(
-                  children: [
-                    Expanded(
-                      child: CharacterCounterField(
-                        controller: _filtroUnidadeHistoricoController,
-                        labelText: 'Unidade',
-                        maxLength: 20,
-                        decoration:
-                            inputDecorationPadrao(context, hintText: 'Unidade'),
-                        onSubmitted: (_) => _buscarHistoricoFiltrado(false),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: CharacterCounterField(
-                        controller: _filtroPlacaHistoricoController,
-                        labelText: 'Placa',
-                        maxLength: 7,
-                        decoration:
-                            inputDecorationPadrao(context, hintText: 'Placa'),
-                        onSubmitted: (_) => _buscarHistoricoFiltrado(false),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Quarta linha: Período
-                _buildPeriodFilter(
-                  context: context,
-                  startDate: _filtroDataInicioHistorico,
-                  endDate: _filtroDataFimHistorico,
-                  onStartDateChanged: (date) =>
-                      setState(() => _filtroDataInicioHistorico = date),
-                  onEndDateChanged: (date) =>
-                      setState(() => _filtroDataFimHistorico = date),
-                ),
-                const SizedBox(height: 12),
-                // Botões de ação
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TransparentIconGroup([
-                      IconActionData(
-                        icon: Symbols.ink_eraser,
-                        tooltip: 'Limpar filtros',
-                        color: IconColors.delete(context),
-                        onPressed: () {
-                          setState(() {
-                            _filtroNomeHistoricoController.clear();
-                            _filtroDocumentoHistoricoController.clear();
-                            _filtroPlacaHistoricoController.clear();
-                            _filtroUnidadeHistoricoController.clear();
-                            _filtroDataInicioHistorico = null;
-                            _filtroDataFimHistorico = null;
-                          });
-                          _buscarHistoricoFiltrado(false);
-                        },
-                      ),
-                      IconActionData(
-                        icon: Symbols.search,
-                        tooltip: 'Pesquisar',
-                        color: IconColors.search(context),
-                        onPressed: _loadingHistorico
-                            ? null
-                            : () => _buscarHistoricoFiltrado(false),
-                      ),
-                    ]),
-                  ],
-                ),
-              ],
+              ),
             ),
           ),
-          const SizedBox(height: 12),
 
+          // 👇 LISTA DE PASSAGENS RECENTES (AO VIVO)
           Expanded(
-            child: _getPassagensLoading()
+            child: _loadingPassagens
                 ? const Center(child: CircularProgressIndicator())
-                : _getPassagensList().isEmpty
-                    ? const SizedBox.shrink()
+                : _passagens.isEmpty
+                    ? const Center(child: Text('Nenhuma passagem recente.'))
                     : ListView.separated(
                         key: const ValueKey('lista_passagens'),
-                        itemCount: _getPassagensList().length,
+                        itemCount: _passagens.length,
                         separatorBuilder: (_, __) => const SizedBox.shrink(),
                         itemBuilder: (context, index) {
-                          final passagem = _getPassagensList()[index];
-                          final destino = passagem['destino'] ?? '';
-                          final nome =
-                              (passagem['nome'] ?? 'Visitante').toString();
-                          final tipo_visita =
-                              (passagem['tipo_visita'] ?? '').toString();
-                          String tipo_visita_ds = "Visitante";
-                          if (tipo_visita == "P") {
-                            tipo_visita_ds = "Prestador Serviço";
-                          }
-
-                          final leitor =
-                              (passagem['leitor_ds'] ?? '').toString();
-                          final data =
-                              (passagem['data'] ?? passagem['dt_ini'] ?? '')
-                                  .toString();
-
-                          // === 1. PEGUE A DATA DE SAÍDA AQUI ===
-                          final dtSaidaStr =
-                              (passagem['dt_saida'] ?? passagem['saida'] ?? '')
-                                  .toString();
-
-                          final itemKey = 'pass_${passagem['id'] ?? index}';
-                          return _buildStandardCard(
-                            uniqueKey: itemKey,
-                            context: context,
-                            title: nome,
-                            subtitle:
-                                '${destino.isNotEmpty ? destino : ' '} - $tipo_visita_ds',
-                            photoBase64:
-                                (passagem['link_foto'] ?? passagem['foto'])
-                                    ?.toString(),
-                            actions: const [],
-                            extraContent: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (leitor.isNotEmpty && leitor != '-')
-                                  Text(
-                                    leitor,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: getSecondaryTextColor(context),
-                                    ),
-                                  ),
-                                if (data.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2.0),
-                                    child: Text(
-                                      'E: $data',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.green,
-                                      ),
-                                    ),
-                                  ),
-                                // === 2. ADICIONE A EXIBIÇÃO DA SAÍDA AQUI ===
-                                if (dtSaidaStr.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2.0),
-                                    child: Text(
-                                      'S: $dtSaidaStr',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.red,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          );
+                          final passagem = _passagens[index];
+                          return _buildPassagemCard(passagem, index);
                         },
                       ),
           ),
@@ -5450,7 +5753,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
-  // Painel 2 - Passagens
 
   Widget _saidasList() {
     return Expanded(
@@ -5462,9 +5764,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: FilterTab(
               title: 'Filtros de Saídas',
               themeColor:
-                  const Color(0xFF00C853), // Verde (padrão desta coluna)
+                  CupertinoColorsService.tabBar1, // Verde (padrão desta coluna)
               icon: Icons.tune,
-              initiallyExpanded: false,
+              initiallyExpanded: true,
               content: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -5580,6 +5882,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           onPressed: _buscarSaidasFiltradas,
                           isLoading: _loadingSaidasList,
                         ),
+                        /*
                         IconActionData(
                           icon: Symbols.assignment_turned_in,
                           tooltip: 'Auto baixa (selecionar múltiplas)',
@@ -5592,6 +5895,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             });
                           },
                         ),
+                        */
                       ]),
                     ],
                   ),
@@ -5738,7 +6042,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             Text(
                                               'S: ${passagem['dt_saida'] ?? ''}',
                                               style: const TextStyle(
-                                                  color: Colors.red,
+                                                  color: CupertinoColorsService
+                                                      .systemRed,
                                                   fontSize: 12),
                                             ),
                                           ],
@@ -5787,7 +6092,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                 ? () {}
                                                 : () => _mostrarOpcoesSaida(
                                                     passagem),
-                                            color: Colors.red,
+                                            color: CupertinoColorsService
+                                                .systemRed,
                                           ),
                                         ]
                                       : [],
@@ -5818,7 +6124,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     String? uniqueKey,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final borderColor = hasError ? Colors.red : getBorderColor(context);
+    final borderColor =
+        hasError ? CupertinoColorsService.systemRed : getBorderColor(context);
 
     // LGPD Masking logic
     final bool isNameMasked =
@@ -6087,7 +6394,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _tabUnidades = i;
               });
             },
-            color: const Color(0xFF7C4DFF), // Roxo padrão da aba
+            color: CupertinoColorsService.tabBar3, // Roxo padrão da aba
           ),
 
           // Área de filtros - abaixo dos botões (somente para Unidade)
@@ -6101,7 +6408,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             // 👇 Transformando o filtro de veículos em FilterTab também!
             FilterTab(
               title: 'Filtros de Veículos',
-              themeColor: const Color(0xFF7C4DFF), // Roxo
+              themeColor: CupertinoColors.systemIndigo, // Roxo
               icon: Icons.tune,
               initiallyExpanded: false,
               content: Column(
@@ -6993,74 +7300,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _fetchConvidadosAgendamento(String reservaId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
-    final tokenSessao =
-        (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-
-    // Obter condominioId por precaução para enviar no payload
-    final condominioId = await getCondominioIdAtual();
-
-    if (tokenSessao.isEmpty) return;
-
-    final url = Uri.parse(
-      ApiConfig.getUrl(
-        'dashboard',
-        'convidados',
-        params: {'reserva_id': reservaId, 'culture': 'pt-br'},
-      ),
-    );
-
-    try {
-      final response = await http.post(url,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $tokenSessao',
-          },
-          // Enviando também no body para garantir compatibilidade com a API
-          body: jsonEncode({
-            "condominio_id": condominioId,
-            "reserva_id": int.tryParse(reservaId) ?? 0
-          }));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        List<dynamic> lista = [];
-
-        // Parsing à prova de balas
-        if (data is List) {
-          lista = data;
-        } else if (data['data'] != null) {
-          final convidadosData = data['data'];
-          if (convidadosData is List) {
-            lista = convidadosData;
-          } else if (convidadosData is Map) {
-            if (convidadosData['convidados'] is List) {
-              lista = convidadosData['convidados'];
-            } else if (convidadosData['lista'] is List) {
-              lista = convidadosData['lista'];
-            }
-          }
-        }
-
-        setState(() {
-          _quantidadeConvidados[reservaId] = lista.length;
-          _convidadosPorReserva[reservaId] = lista;
-        });
-      } else {
-        // Se a API falhar, registra vazio para tirar do estado de "Carregando"
-        setState(() {
-          _convidadosPorReserva[reservaId] = [];
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _convidadosPorReserva[reservaId] = [];
-      });
-    }
-  }
-
   Future<void> _fetchAgendamentos({bool isFiltro = false}) async {
     setState(() {
       _loadingAgendamentos = true;
@@ -7138,7 +7377,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         for (final agendamento in ags) {
           final reservaId = agendamento['reserva_id'];
           if (reservaId != null) {
-            _fetchConvidadosAgendamento(reservaId.toString());
+            final convidados =
+                await ConvidadosApi.ConvidadosList(reservaId.toString());
+            setState(() {
+              _convidadosPorReserva[reservaId.toString()] = convidados;
+              _quantidadeConvidados[reservaId.toString()] = convidados.length;
+            });
           }
         }
       } else {
@@ -7441,6 +7685,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Executar as duas buscas
     await buscarPorOrdem(1);
     await buscarPorOrdem(2);
+  }
+
+  Future<List<dynamic>> _getConvidadosComMovimentacao(String reservaId,
+      [String? reservaConvidadoId]) async {
+    // 1. Busca a lista original (repassando o parâmetro opcional)
+// 1. Busca a lista original (repassando o parâmetro opcional)
+    final convidados =
+        await ConvidadosApi.ConvidadosList(reservaId, reservaConvidadoId);
+
+    try {
+      // 2. Busca as movimentações de entrada e saída (repassando o parâmetro opcional)
+      final movimentos = await ConvidadosApi.ConvidadosEntradaSaida(
+          reservaId, reservaConvidadoId);
+
+      // 3. Faz o merge dos dados de movimentação para dentro dos convidados
+      for (var c in convidados) {
+        final rcId =
+            c['reservaconvidado_id']?.toString() ?? c['id']?.toString();
+
+        // Encontra o movimento correspondente a esse convidado
+        final mov = movimentos.lastWhere(
+          (m) => m['reservaconvidado_id']?.toString() == rcId,
+          orElse: () => null,
+        );
+
+        if (mov != null) {
+          // Sobrescreve as variáveis que controlam o visual (jaDeuEntrada / jaDeuSaida)
+          c['entrada'] = mov['dt_entrada'];
+          c['dt_entrada'] = mov['dt_entrada'];
+          c['saida'] = mov['dt_saida'];
+          c['dt_saida'] = mov['dt_saida'];
+        }
+      }
+    } catch (e) {
+      print('Erro ao buscar entrada/saída para a reserva $reservaId: $e');
+    }
+
+    return convidados;
   }
 
   // Atualizar cadastro avulso via API editacadastro (chamado quando campos perdem foco)
@@ -7854,9 +8136,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildFiltrosVagas() {
     return FilterTab(
       title: 'Filtros de Vagas',
-      themeColor: const Color(0xFF7C4DFF), // Roxo da aba Unidades
+      themeColor: CupertinoColors.systemIndigo, // Roxo da aba Unidades
       icon: Icons.tune,
-      initiallyExpanded: false,
+      initiallyExpanded: true,
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -7933,9 +8215,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildFiltrosUnidades() {
     return FilterTab(
       title: 'Filtros de Unidades',
-      themeColor: const Color(0xFF7C4DFF), // Cor roxa da aba Unidades
+      themeColor: CupertinoColors.systemIndigo, // Cor roxa da aba Unidades
       icon: Icons.tune,
-      initiallyExpanded: false,
+      initiallyExpanded: true,
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -8032,7 +8314,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     //final corTema = _tipoFiltroEntrada == 0 ? Colors.grey : Colors.blue;
-    final corTema = const Color(0xFF00C853); // Verde da aba Avulso
+    final corTema = CupertinoColorsService.tabBar1; // Verde da aba Avulso
 
     // 2. Usamos o FilterTab no lugar do antigo Container
     return FilterTab(
@@ -8634,31 +8916,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Expanded(
                   child: LayoutBuilder(builder: (context, constraints) {
-                    Map<String, dynamic>? selectedUnidade;
-                    if (_filtroUnidadeHistoricoController.text.isNotEmpty) {
-                      try {
-                        selectedUnidade = _unidadesList.firstWhere(
-                          (u) =>
-                              unidadeLabelComMorador(u) ==
-                              _filtroUnidadeHistoricoController.text,
-                        );
-                      } catch (_) {}
-                    }
-                    return buildStandardAutocomplete<Map<String, dynamic>>(
-                      context: context,
-                      key: const ValueKey('form_entrada_unidade'),
-                      labelText: 'Unidade',
-                      items: _unidadesList,
-                      itemAsString: (option) => unidadeLabelComMorador(option),
-                      selectedItem: selectedUnidade,
-                      onSelected: (value) {
-                        setState(() {
-                          _filtroUnidadeHistoricoController.text = value != null
-                              ? unidadeLabelComMorador(value)
-                              : '';
-                        });
-                      },
-                      constraints: const BoxConstraints(maxHeight: 250),
+                    return Stack(
+                      alignment: Alignment.centerRight,
+                      children: [
+                        buildStandardAutocomplete<Map<String, dynamic>>(
+                          key: const ValueKey('filtro_unidade_historico'),
+                          context: context,
+                          labelText: 'Unidade',
+                          items: _unidadesList,
+                          itemAsString: (option) =>
+                              unidadeLabelComMorador(option),
+                          selectedItem: _selectedUnidadeHistorico,
+                          onSelected: (value) {
+                            setState(() {
+                              _selectedUnidadeHistorico = value;
+                              _filtroAptoIdHistorico = value != null
+                                  ? (_convertToValidId(value['apto_id']) ??
+                                      _convertToValidId(value['id']))
+                                  : null;
+                            });
+                          },
+                          constraints: constraints,
+                        ),
+                        if (_selectedUnidadeHistorico != null)
+                          Positioned(
+                            right: 30,
+                            child: IconButton(
+                              icon: const Icon(Icons.close, size: 16),
+                              color: CupertinoColors.systemPink,
+                              onPressed: () {
+                                setState(() {
+                                  _selectedUnidadeHistorico = null;
+                                  _filtroAptoIdHistorico = null;
+                                });
+                              },
+                            ),
+                          ),
+                      ],
                     );
                   }),
                 ),
@@ -8701,11 +8995,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _filtroNomeHistoricoController.clear();
                       _filtroDocumentoHistoricoController.clear();
                       _filtroPlacaHistoricoController.clear();
-                      _filtroUnidadeHistoricoController.clear();
                       setState(() {
                         _filtroDataInicioHistorico = null;
                         _filtroDataFimHistorico = null;
                         _mostrarRecentes = false;
+                        _selectedUnidadeHistorico = null; // 👈 Adicione isso
+                        _filtroAptoIdHistorico = null; // 👈 Adicione isso
                       });
                     },
                   ),
@@ -8951,23 +9246,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final url =
           Uri.parse(ApiConfig.getEndpoint('dashboard', 'historicoPassagem'));
 
-      // Usar data atual por padrão, ou filtro se selecionado
-      final hoje = DateTime.now();
-      final dataIni = _filtroDataInicioHistorico ?? hoje;
-      final dataFim = _filtroDataFimHistorico ?? hoje;
-
       final payload = {
-        "apto_id": 0,
+        "apto_id":
+            _filtroAptoIdHistorico ?? 0, // 👈 Substitua o 0 por esta variável
         "condominio_id": int.tryParse(condominioId) ?? 0,
-        "dt_fim":
-            '${dataFim.year}-${dataFim.month.toString().padLeft(2, '0')}-${dataFim.day.toString().padLeft(2, '0')} 23:59:59', // Data atual ou filtro (23:59:59)
-        "dt_ini":
-            '${dataIni.year}-${dataIni.month.toString().padLeft(2, '0')}-${dataIni.day.toString().padLeft(2, '0')} 00:00:00', // Data atual ou filtro (00:00:00)
         "nome": _filtroNomeHistoricoController.text.trim(),
-        "pessoaveiculo": _filtroDocumentoHistoricoController.text.trim(),
+        "documento": _filtroDocumentoHistoricoController.text.trim(),
         "placa": _filtroPlacaHistoricoController.text.trim(),
         "naosairam": naosairam
       };
+
+      // 2. Injeta a data inicial APENAS se ela foi selecionada
+      if (_filtroDataInicioHistorico != null) {
+        final dIni = _filtroDataInicioHistorico!;
+        payload["dt_ini"] =
+            '${dIni.year}-${dIni.month.toString().padLeft(2, '0')}-${dIni.day.toString().padLeft(2, '0')} 00:00:00';
+      }
+
+      // 3. Injeta a data final APENAS se ela foi selecionada
+      if (_filtroDataFimHistorico != null) {
+        final dFim = _filtroDataFimHistorico!;
+        payload["dt_fim"] =
+            '${dFim.year}-${dFim.month.toString().padLeft(2, '0')}-${dFim.day.toString().padLeft(2, '0')} 23:59:59';
+      }
 
       final response = await http.post(
         url,
@@ -9109,24 +9410,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final url =
           Uri.parse(ApiConfig.getEndpoint('dashboard', 'historicoPassagem'));
 
-      // Usar data atual por padrão, ou filtro se selecionado
-      final hoje = DateTime.now();
-      final dataIni = _filtroDataInicioSaidas ?? hoje;
-      final dataFim = _filtroDataFimSaidas ?? hoje;
-
       final payload = {
         "apto_id": 0,
         "condominio_id": int.tryParse(condominioId) ?? 0,
-        "dt_fim":
-            '${dataFim.year}-${dataFim.month.toString().padLeft(2, '0')}-${dataFim.day.toString().padLeft(2, '0')} 23:59:59', // Data atual ou filtro (23:59:59)
-        "dt_ini":
-            '${dataIni.year}-${dataIni.month.toString().padLeft(2, '0')}-${dataIni.day.toString().padLeft(2, '0')} 00:00:00', // Data atual ou filtro (00:00:00)
         "nome": _filtroNomeSaidasController.text.trim(),
-        "pessoaveiculo": _filtroDocumentoSaidasController.text.trim(),
+        "documento": _filtroDocumentoSaidasController.text.trim(),
         "placa": _filtroPlacaSaidasController.text.trim(),
         "naosairam": true
       };
 
+      print('_filtroDataInicioSaidas: $_filtroDataInicioSaidas');
+      print('_filtroDataFimSaidas: $_filtroDataFimSaidas');
+
+      // 2. Injeta a data inicial APENAS se ela foi selecionada
+      if (_filtroDataInicioSaidas != null) {
+        final dIni = _filtroDataInicioSaidas!;
+        payload["dt_ini"] =
+            '${dIni.year}-${dIni.month.toString().padLeft(2, '0')}-${dIni.day.toString().padLeft(2, '0')} 00:00:00';
+      }
+
+      // 3. Injeta a data final APENAS se ela foi selecionada
+      if (_filtroDataFimSaidas != null) {
+        final dFim = _filtroDataFimSaidas!;
+        payload["dt_fim"] =
+            '${dFim.year}-${dFim.month.toString().padLeft(2, '0')}-${dFim.day.toString().padLeft(2, '0')} 23:59:59';
+      }
       final response = await http.post(
         url,
         headers: {
@@ -9256,17 +9564,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (resultados.isNotEmpty) {
             final tipo = resultados[0]['tipo']?.toString() ?? '';
             if (tipo == 'AG') {
-              // AGENDAMENTO LOCALIZADO! Muda para a aba de Agendamentos
+              // 1. Extrai IDs para buscar os dados detalhados do convidado
+              final reservaId = resultados[0]['id_pai']?.toString() ?? '0';
+              final reservaConvidadoId =
+                  resultados[0]['id_filho']?.toString() ?? '0';
+
+              // 2. FAZ A CHAMADA NA API 'dashboard', 'convidados' COM id_pai E id_filho
+              try {
+                final responseConvidados = await ConvidadosApi.ConvidadosList(
+                    reservaId, reservaConvidadoId);
+
+                if (responseConvidados.isNotEmpty) {
+                  // Mescla os dados recebidos (incluindo "entrada" e "saida") no resultado atual
+                  resultados[0].addAll(responseConvidados[0]);
+
+                  // Armazena no cache local para a interface consumir imediatamente
+                  setState(() {
+                    if (!_convidadosPorReserva.containsKey(reservaId)) {
+                      _convidadosPorReserva[reservaId] = [];
+                    }
+                    final list = _convidadosPorReserva[reservaId]!;
+                    final index = list.indexWhere((g) =>
+                        g['reservaconvidado_id'].toString() ==
+                        reservaConvidadoId);
+                    if (index != -1) {
+                      list[index].addAll(responseConvidados[0]);
+                    } else {
+                      list.add(responseConvidados[0]);
+                    }
+                  });
+                }
+              } catch (e) {
+                print('Erro ao buscar detalhes do convidado: $e');
+              }
+
+              // 3. Muda para a aba de Agendamentos e renderiza o card atualizado
+              // 3. Muda para a aba de Agendamentos e prepara o layout
               setState(() {
-                _tabAvulsoAgendamentosSaidas =
-                    1; // Alterna o SegmentedControl para "Agendamentos"
-                _tipoFiltroEntrada = 1; // Atualiza a lógica de filtros
-                _mostrarFormEntrada =
-                    false; // Garante que NENHUM form seja mostrado
+                _tabAvulsoAgendamentosSaidas = 1;
+                _tipoFiltroEntrada = 1;
+                _mostrarFormEntrada = false;
                 _filtroEntradaMinimizado = false;
               });
 
-              // 👇 A MÁGICA AQUI: Simulamos o clique no botão "Pesquisar" da aba de Agendamentos
+              // 👇 4. A MÁGICA: Simulamos o clique na Lupa sem usar "await" para evitar a tela cinza!
               final espacosSelecionados = _espacosSocialList.where((espaco) {
                 final id = espaco['espacopublico_id'] as int? ?? 0;
                 return _espacosSociaisSelecionadosFiltro[id] == true;
@@ -9276,10 +9617,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ? espacosSelecionados
                   : _espacosSocialList;
 
-              _tipoFiltroEntrada = 2; // Atualiza a lógica de filtros
-              // Aciona a busca nativa da aba de agendamentos para listar os resultados perfeitamente
-              await _buscarAgendamentosEntradaFiltrados(
+              // Chama a busca nativa da aba Agendamentos (SEM AWAIT) para exibir o card instantaneamente
+              _buscarAgendamentosEntradaFiltrados(
                   espacosSelecionados: espacosParaBusca);
+
+              if (!mounted) return;
 
               setState(() {
                 _loadingBuscaEntrada = false;
@@ -9291,7 +9633,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 message:
                     'Foi encontrado um agendamento prévio para este visitante.',
               );
-              return; // 👈 Interrompe a execução aqui, ignorando a busca avulsa!
+              return; // Interrompe a execução aqui, ignorando o cadastro avulso!
             } else {
               pessoacadastroId =
                   int.tryParse(resultados[0]['id_pai']?.toString() ?? '0') ?? 0;
@@ -10539,7 +10881,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         ),
                                         IconActionData(
                                           icon: Icons.exit_to_app,
-                                          color: Colors.red,
+                                          color:
+                                              CupertinoColorsService.systemRed,
                                           tooltip: 'Saída',
                                           onPressed: () =>
                                               _executarSaida(convidado),
@@ -12451,32 +12794,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
         final tokenSessao =
             (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-
+        final url =
+            Uri.parse(ApiConfig.getEndpoint('dashboard', 'historicoPassagem'));
         final encryptedCondominioId = prefs.getString('condominio_id') ?? '';
         final condominioId = (encryptedCondominioId.isNotEmpty)
             ? decryptText(encryptedCondominioId)
             : '';
 
-        // Usar data atual por padrão, ou filtro se selecionado
-        final hoje = DateTime.now();
-        final dataIni = _filtroDataInicioSaidas ?? hoje;
-        final dataFim = _filtroDataFimSaidas ?? hoje;
-
-        final url =
-            Uri.parse(ApiConfig.getEndpoint('dashboard', 'historicoPassagem'));
-
-        final payload = {
+        // 1. Cria o payload explicitamente tipado e sem as datas
+        final payload = <String, dynamic>{
           "apto_id": 0,
           "condominio_id": int.tryParse(condominioId) ?? 0,
-          "dt_fim":
-              '${dataFim.year}-${dataFim.month.toString().padLeft(2, '0')}-${dataFim.day.toString().padLeft(2, '0')} 23:59:59', // Data atual ou filtro (23:59:59)
-          "dt_ini":
-              '${dataIni.year}-${dataIni.month.toString().padLeft(2, '0')}-${dataIni.day.toString().padLeft(2, '0')} 00:00:00', // Data atual ou filtro (00:00:00)
-          "nome": "",
-          "pessoaveiculo": "",
-          "placa": "",
-          "naosairam": sairam
+          "naosairam": sairam,
         };
+
+        // 2. Injeta a data inicial APENAS se ela foi selecionada
+        if (_filtroDataInicioSaidas != null) {
+          final dIni = _filtroDataInicioSaidas!;
+          payload["dt_ini"] =
+              '${dIni.year}-${dIni.month.toString().padLeft(2, '0')}-${dIni.day.toString().padLeft(2, '0')} 00:00:00';
+        }
+
+        // 3. Injeta a data final APENAS se ela foi selecionada
+        if (_filtroDataFimSaidas != null) {
+          final dFim = _filtroDataFimSaidas!;
+          payload["dt_fim"] =
+              '${dFim.year}-${dFim.month.toString().padLeft(2, '0')}-${dFim.day.toString().padLeft(2, '0')} 23:59:59';
+        }
 
         final response = await http.post(
           url,
@@ -13099,9 +13443,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           await Future.delayed(const Duration(seconds: 2));
           final now = DateTime.now();
-          final formattedDate =
-              '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-
           final payloadMover = {
             'condominio_id': int.tryParse(condominioId.toString()) ?? 0,
             'origem': 'E', // E = Entrada
@@ -13109,7 +13450,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             'reserva_id': reservaIdInt,
             'reservaconvidado_id': reservaconvidadoIdInt,
             'usuario_registro': int.tryParse(usuarioId.toString()) ?? 0,
-            'dt_entrada': formattedDate,
           };
 
           final responseMover = await http.post(
@@ -13440,7 +13780,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         setState(() {
           // Adicionar ao histórico geral para visibilidade imediata
-          _todasPassagens.insert(0, Map<String, dynamic>.from(novoConvidado));
+          //_todasPassagens.insert(0, Map<String, dynamic>.from(novoConvidado));
         });
 
         // Limpar tudo e fechar formulário
@@ -13466,26 +13806,116 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<void> _tirarFotoRostoAnt() async {
+    // Volte para a chamada simples. Exemplo com showDialog:
+    final result = await showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.5),
+      builder: (ctx) => const FacialCaptureModal(), // Sua modal de captura
+    );
+
+    if (result != null && result is String && result.isNotEmpty) {
+      setState(() {
+        _fotoRostoEntrada = result;
+      });
+    }
+  }
+
+  Future<void> _tirarFotoRostoant1() async {
+    final completer = Completer<String?>();
+    late OverlayEntry overlayEntry;
+
+    overlayEntry = OverlayEntry(
+      builder: (ctx) => ScaffoldMessenger(
+        // 👈 Captura SnackBars nesta camada
+        child: Navigator(
+          // 👈 Captura Dialogs nesta camada
+          onGenerateRoute: (settings) => PageRouteBuilder(
+            opaque: false, // 👈 Mantém o fundo transparente
+            pageBuilder: (navCtx, _, __) => Material(
+              color: Colors.transparent,
+              child: Stack(
+                children: [
+                  // Fundo escuro (Barrier)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      onTap: () {
+                        overlayEntry.remove();
+                        if (!completer.isCompleted) completer.complete(null);
+                      },
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ),
+                  // Modal de Captura
+                  Center(
+                    child: FacialCaptureModal(
+                      onClose: () {
+                        overlayEntry.remove();
+                        if (!completer.isCompleted) completer.complete(null);
+                      },
+                      onCapture: (String fotoBase64) {
+                        overlayEntry.remove();
+                        if (!completer.isCompleted)
+                          completer.complete(fotoBase64);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // Injeta a tela na camada MAIS ALTA possível do Flutter (acima do painel lateral)
+    Overlay.of(context, rootOverlay: true).insert(overlayEntry);
+
+    // Fica aguardando a interação do usuário na modal
+    final result = await completer.future;
+
+    if (result != null && result.isNotEmpty) {
+      setState(() {
+        _fotoRostoEntrada = result;
+      });
+    }
+  }
+
   Future<void> _tirarFotoRosto() async {
+    // Bloquear foto de documento em AG (agendamento)
+    if (_reservaSelecionada != null) {
+      FeedbackUtils.showError(
+        context: context,
+        title: 'Aviso',
+        message: 'Para agendamentos não é necessário foto do documento.',
+      );
+      return;
+    }
+
     try {
-      // Usar a nova modal de captura facial com contexto global
+      // Usar a nova modal de captura facial (sem overlay facial) com contexto global
       final globalContext = _dashboardContext ?? context;
       final photoDataUrl = await showDialog<String>(
         context: globalContext,
         barrierColor: Colors.black.withValues(alpha: 0.5),
-        builder: (context) => const FacialCaptureModal(isFrontal: true),
+        builder: (context) => const FacialCaptureModal(isFrontal: false),
       );
 
       if (photoDataUrl != null && photoDataUrl.isNotEmpty) {
+        print(' Foto rosto capturada, processando...');
         await _processarFotoCapturadaRosto(photoDataUrl);
       }
-    } catch (e) {
-      FeedbackUtils.showError(
-        context: context,
-        title: 'Erro ao Capturar',
-        message: 'Erro ao capturar foto',
-        errorDetails: e.toString(),
-      );
+    } catch (e, stackTrace) {
+      if (mounted) {
+        FeedbackUtils.showError(
+          context: context,
+          title: 'Erro ao Capturar',
+          message: 'Erro ao capturar foto do rosto',
+          errorDetails: e.toString(),
+        );
+      }
     }
   }
 
@@ -13508,11 +13938,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
       return;
     }
-    print(' BOTão DOCUMENTO CLICADO!');
     try {
-      print(
-          ' Iniciando _tirarFotoDocumento() - contexto válido: ${context != null}');
-
       // Usar a nova modal de captura facial (sem overlay facial) com contexto global
       final globalContext = _dashboardContext ?? context;
       final photoDataUrl = await showDialog<String>(
@@ -13533,7 +13959,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         FeedbackUtils.showError(
           context: context,
           title: 'Erro ao Capturar',
-          message: 'Erro ao capturar foto',
+          message: 'Erro ao capturar foto documento',
           errorDetails: e.toString(),
         );
       }
@@ -14550,52 +14976,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await _buscarSaidasFiltradas();
     } else {
       await _buscarHistoricoFiltrado(true);
-    }
-  }
-
-  Future<void> _abrirModalConvidados(String reservaId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
-    final tokenSessao =
-        (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-
-    if (tokenSessao.isEmpty) return;
-
-    final url = Uri.parse(
-      ApiConfig.getUrl(
-        'dashboard',
-        'convidados',
-        params: {'reserva_id': reservaId, 'culture': 'pt-br'},
-      ),
-    );
-
-    try {
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final convidadosData = data['data'];
-        final lista =
-            (convidadosData is Map && convidadosData['convidados'] is List)
-                ? convidadosData['convidados']
-                : [];
-
-        // Mostrar painel lateral usando OverlayEntry (sem barreira)
-        _abrirPainelLateral(
-          _ConvidadosModal(
-            reservaId: reservaId,
-            convidados: List<Map<String, dynamic>>.from(lista),
-          ),
-        );
-      }
-    } catch (e) {
-      // Silenciosamente ignora erro
     }
   }
 

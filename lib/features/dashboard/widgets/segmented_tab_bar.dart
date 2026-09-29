@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import '../../../core/theme/cupertino_colors_service.dart';
 
 class SegmentedTabBar extends StatelessWidget {
   final List<String> labels;
@@ -152,15 +153,15 @@ class SegmentedTabBar extends StatelessWidget {
         firstLabel.contains('saída') ||
         firstLabel.contains('saidas') ||
         firstLabel.contains('avulso')) {
-      return const Color(0xFF00C853);
+      return CupertinoColorsService.tabBar1;
     } else if (firstLabel.contains('agendamentos')) {
-      return const Color(0xFF7338E6);
+      return CupertinoColorsService.tabBar2;
     } else if (firstLabel.contains('unidade') ||
         firstLabel.contains('unidades')) {
-      return const Color(0xFF7C38A5);
+      return CupertinoColorsService.tabBar3;
     } else if (firstLabel.contains('encomendas') ||
         firstLabel.contains('entregar')) {
-      return const Color(0xFFFF6D00);
+      return CupertinoColorsService.tabBar4;
     }
     return color;
   }

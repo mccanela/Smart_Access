@@ -235,9 +235,6 @@ class SignalRService {
       print('🔔 [SignalR] EVENTO "Comandos" RECEBIDO: $args');
     });
 
-    print(
-        '[SignalR] Event handlers configurados (PassagemListar, PassagensUpdate)');
-
     _hubConnection!.onclose((error) {
       print('[SignalR] onclose (Terminado): $error');
       _notifyConnectionState(false);
