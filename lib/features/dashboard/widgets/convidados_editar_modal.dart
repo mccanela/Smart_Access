@@ -53,9 +53,11 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
     super.initState();
     final c = widget.convidado;
 
-    String documentoValue = c['documento'].toString();
+// 👇 Garante que se vier nulo, ele transforma em texto vazio real
+    String documentoValue =
+        (c['documento'] ?? c['documento_txt'] ?? '').toString();
 
-    if (documentoValue == "Não Informado") {
+    if (documentoValue == "Não Informado" || documentoValue == "null") {
       documentoValue = "";
     }
 
@@ -97,6 +99,10 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
     } catch (_) {}
 
     _fotoRostoEntrada = c['link_foto']?.toString() ?? c['foto']?.toString();
+
+    // 👇 Removido o sinal de exclamação usando interpolação segura
+    print(' _fotoRostoEntrada WIDGET.CONVIDADO $_fotoRostoEntrada');
+
     if (_fotoRostoEntrada == 'null') _fotoRostoEntrada = null;
   }
 
@@ -183,6 +189,14 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
       return false; // Interrompe a execução
     }
 
+    if (!Utilities.isDocumentoValido(doc)) {
+      FeedbackUtils.showWarning(
+          context: context,
+          title: 'Documento Inválido',
+          message: 'O documento preenchido não é um CPF, CNPJ ou RG válido.');
+      return false;
+    }
+
     // Aproveitamos para mover a validação do Nome para cá, centralizando tudo!
     if (_nomeController.text.trim().isEmpty) {
       FeedbackUtils.showWarning(
@@ -203,7 +217,7 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
     if (doc.toLowerCase() == "não informado") {
       dados['documento'] = "";
     } else {
-      dados['documento'] = doc;
+      dados['documento'] = Utilities.removerPontuacao(doc);
     }
 
     dados['nome'] = _nomeController.text.trim();
@@ -348,6 +362,9 @@ class _EditarConvidadoModalState extends State<EditarConvidadoModal> {
                           focusNode: _documentoFocusNode,
                           keyboardType: TextInputType.number,
                           style: const TextStyle(fontSize: 16),
+                          inputFormatters: [
+                            DocumentoFormatter(),
+                          ],
                           decoration: inputDecorationPadrao(context,
                               hintText: 'Documento'),
                         )

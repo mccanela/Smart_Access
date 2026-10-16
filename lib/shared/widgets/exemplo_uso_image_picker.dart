@@ -2,7 +2,7 @@
 // Este arquivo mostra como integrar o CustomImagePicker na sua aplicação
 
 import 'package:flutter/material.dart';
-import 'package:smart_flutter/shared/widgets/custom_image_picker.dart';
+import 'package:SmartAccess/shared/widgets/custom_image_picker.dart';
 
 /// Exemplo de como usar o CustomImagePicker em um modal ou página
 class ExemploUsoImagePicker extends StatefulWidget {

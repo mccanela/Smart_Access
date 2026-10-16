@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/utils/ui_standards.dart';
 import '../../shared/widgets/screen_header.dart';
+import '../../core/config/api_config.dart';
 
 /// Painel Lateral de Upgrade para o Smart Access
 class UpgradeModal extends StatefulWidget {
@@ -131,7 +132,7 @@ class _UpgradeModalState extends State<UpgradeModal> {
                     bottomRight: Radius.circular(16),
                   ),
                   child: Image.network(
-                    'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/geral/novia-c-upsell.jpg',
+                    '${ApiConfig.imageUrl}geral/novia-c-upsell.jpg',
                     fit: BoxFit
                         .cover, // Isso garante que a imagem estique para cobrir 100% do container, sem sobrar bordas pretas/brancas!
                     width: double.infinity,

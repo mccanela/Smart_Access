@@ -12,7 +12,7 @@ import '../../core/services/crypto_utils.dart';
 import '../../core/config/api_config.dart';
 import '../../core/services/feedback_utils.dart';
 import '../../core/theme/cupertino_colors_service.dart';
-
+import '../../core/services/condominio_api.dart';
 import 'services/reference_data_service.dart';
 import 'services/delivery_pdf_service.dart';
 import '../../features/unidades/unidade_detalhe_screen.dart'
@@ -38,8 +38,9 @@ import '../../shared/widgets/filter_tab.dart';
 import '../../core/utils/ui_standards.dart';
 import '../../core/services/signalr_service.dart';
 import '../../core/services/convidados_api.dart';
+import '../../core/services/convidados_api.dart';
 
-import '../../core/utils/file_download/file_download.dart';
+import '../../core/utils/utilities.dart';
 
 import '../../shared/widgets/character_counter_field.dart';
 import '../modals/ocorrencias_modal.dart';
@@ -227,6 +228,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _historicoFiltradoModal = [];
   bool _loadingModal = false;
   final Set<String> _loadingActionKeys = {};
+  // Cache para evitar que a API seja chamada a cada setState
+  final Map<String, Future<dynamic>> _statusConvidadosCache = {};
+
   Future<void> _buscarHistoricoModal(
       void Function(void Function()) setPanelState) async {
     setPanelState(() {
@@ -246,7 +250,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         "apto_id": _filtroAptoIdModal ?? 0,
         "condominio_id": int.tryParse(condominioId) ?? 0,
         "nome": _filtroNomeModalController.text.trim(),
-        "documento": _filtroDocumentoModalController.text.trim(),
+        "documento": Utilities.removerPontuacao(
+            _filtroDocumentoModalController.text.trim()),
         "placa": _filtroPlacaModalController.text.trim(),
         "naosairam": false
       };
@@ -298,7 +303,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Widget _buildPassagemCard(Map<String, dynamic> passagem, int index) {
+  Widget _buildPassagemCard(Map<String, dynamic> passagem, int index,
+      {bool isModal = false, VoidCallback? onReveal}) {
     final destino = passagem['destino'] ?? '';
     final nome = (passagem['nome'] ?? 'Visitante').toString();
     final tipo_visita = (passagem['tipo_visita'] ?? '').toString();
@@ -307,20 +313,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
       tipo_visita_ds = "Prestador Serviço";
     }
 
+// Busca abrangendo os padrões da API REST e do SignalR
+    String tipodescricao = (passagem['tipodescricao'] ??
+            passagem['TipoDescricao'] ??
+            passagem['tipoDescricao'] ??
+            passagem['tipo_descricao'] ??
+            '')
+        .toString();
+
+    // Fallback à prova de falhas: deduz pela sigla cobrindo as chaves do SignalR
+    if (tipodescricao.trim().isEmpty) {
+      final tipo = (passagem['tipo'] ?? passagem['Tipo'] ?? '')
+          .toString()
+          .trim()
+          .toUpperCase();
+      if (tipo == 'AV') {
+        tipodescricao = 'Avulso';
+      } else if (tipo == 'AG' || tipo == 'A') {
+        tipodescricao = 'Agendado';
+      }
+    }
+
     final leitor = (passagem['leitor_ds'] ?? '').toString();
     final data =
         (passagem['dt_entrada'] ?? passagem['dt_ini'] ?? '').toString();
     final dtSaidaStr =
         (passagem['dt_saida'] ?? passagem['saida'] ?? '').toString();
 
-    final itemKey = 'pass_${passagem['id'] ?? index}';
+// 👇 CRIE UM ID ÚNICO PARA O MODAL EVITAR CONFLITO COM A TELA DE FUNDO
+    final itemKey = isModal
+        ? 'modal_pass_${passagem['id'] ?? index}'
+        : 'pass_${passagem['id'] ?? index}';
+
     return _buildStandardCard(
       uniqueKey: itemKey,
       context: context,
       title: nome,
-      subtitle: '${destino.isNotEmpty ? destino : ' '} - $tipo_visita_ds',
+      // 👇 NOVO: Inserindo o tipodescricao (ex: "Visitante - Avulso")
+      subtitle:
+          '${destino.isNotEmpty ? destino : ' '} - $tipo_visita_ds - $tipodescricao',
       photoBase64: (passagem['link_foto'] ?? passagem['foto'])?.toString(),
       actions: const [],
+      onReveal: onReveal, // 👈 ENVIE O COMANDO DE ATUALIZAÇÃO
       extraContent: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -384,7 +418,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           },
           isLoading: _loadingModal,
           historicoFiltrado: _historicoFiltradoModal,
-          buildPassagemCard: _buildPassagemCard,
+          buildPassagemCard: (passagem, index) => _buildPassagemCard(
+            passagem,
+            index,
+            isModal: true,
+            onReveal: () =>
+                setPanelState(() {}), // Força a foto aparecer dentro do modal
+          ),
           buildUnidadeAutocomplete: () {
             return LayoutBuilder(builder: (context, constraints) {
               return Stack(
@@ -408,20 +448,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     },
                     constraints: constraints,
                   ),
-                  if (_selectedUnidadeModal != null)
-                    Positioned(
-                      right: 30,
-                      child: IconButton(
-                        icon: const Icon(Icons.close, size: 16),
-                        color: CupertinoColors.systemPink,
-                        onPressed: () {
-                          setPanelState(() {
-                            _selectedUnidadeModal = null;
-                            _filtroAptoIdModal = null;
-                          });
-                        },
-                      ),
-                    ),
                 ],
               );
             });
@@ -521,22 +547,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // Funçao auxiliar para anonimizar dados (LGPD)
-  String _maskName(String name) {
-    if (name.isEmpty) return name;
-    final parts = name.trim().split(' ');
-    if (parts.length <= 1) return name;
-    final firstName = parts[0];
-    final secondPart = parts[1];
-    if (secondPart.isEmpty) return firstName;
-    return '$firstName ${secondPart[0]}.';
-  }
-
-  String _maskDocument(String doc) {
-    if (doc.isEmpty) return doc;
-    final cleanDoc = doc.replaceAll(RegExp(r'[^0-9]'), '');
-    if (cleanDoc.length < 3) return '***';
-    return '${cleanDoc.substring(0, 3)}${'*' * (min(cleanDoc.length, 11) - 3)}';
-  }
 
   // Controle de exibição de PII (LGPD)
   final Set<String> _revealedPii = {};
@@ -1007,8 +1017,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'email_txt': convidado['email'] ?? convidado['email_txt'] ?? '',
         'autorizante_txt':
             convidado['autorizante'] ?? convidado['autorizante_txt'] ?? '',
-        'documento_txt':
-            convidado['documento'] ?? convidado['documento_txt'] ?? '',
+        'documento_txt': Utilities.removerPontuacao(
+            (convidado['documento'] ?? convidado['documento_txt'] ?? '')
+                .toString()),
         'empresa_txt': convidado['empresa'] ?? convidado['empresa_txt'] ?? '',
         'creci_txt': convidado['creci'] ?? convidado['creci_txt'] ?? '',
         'placa': convidado['placa'] ?? '',
@@ -1230,12 +1241,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final url = Uri.parse(
           ApiConfig.getEndpoint('dashboard', 'registroEntradaAvulso'));
 
-      // ---------------------------------------------------------
-      // NOVO FLUXO: Buscar dados atualizados antes de registrar
-      // ---------------------------------------------------------
-      final documento =
+      final documento = Utilities.removerPontuacao(
           (convidado['documento'] ?? convidado['documento_txt'] ?? '')
-              .toString();
+              .toString());
       Map<String, dynamic> dadosEnriquecidos =
           Map<String, dynamic>.from(convidado);
 
@@ -1346,15 +1354,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
       if (autorizanteFinal.isEmpty) autorizanteFinal = 'PORTARIA';
 
+      String fotoRostoClean = "";
+      String fotoDocClean = "";
+
+      // 1. GRAVAR FOTO DO ROSTO (ordem_num: 1)
+      if (_fotoRostoEntrada != null &&
+          _fotoRostoEntrada!.isNotEmpty &&
+          !_fotoRostoEntrada!.startsWith('http')) {
+        fotoRostoClean = _fotoRostoEntrada!.contains(',')
+            ? _fotoRostoEntrada!.split(',').last
+            : _fotoRostoEntrada!;
+      }
+
+      // 2. GRAVAR FOTO DO DOCUMENTO (ordem_num: 2)
+      if (_fotoDocumentoEntrada != null &&
+          _fotoDocumentoEntrada!.isNotEmpty &&
+          !_fotoDocumentoEntrada!.startsWith('http')) {
+        fotoDocClean = _fotoDocumentoEntrada!.contains(',')
+            ? _fotoDocumentoEntrada!.split(',').last
+            : _fotoDocumentoEntrada!;
+      }
+
       // Payload completo seguindo o fluxo de Salvar (Editar)
       final payload = {
         "condominio_id": condominioId,
         "pessoadocumento_id": pessoadocumentoId,
-        "documento": (dadosEnriquecidos['documento'] ??
-                dadosEnriquecidos['documento_txt'] ??
-                convidado['documento'] ??
-                '')
-            .toString(),
+        "documento": Utilities.removerPontuacao(
+            (dadosEnriquecidos['documento'] ??
+                    dadosEnriquecidos['documento_txt'] ??
+                    convidado['documento'] ??
+                    '')
+                .toString()),
         "nome": (dadosEnriquecidos['nome'] ??
                 dadosEnriquecidos['convidado_txt'] ??
                 convidado['nome'] ??
@@ -1391,8 +1421,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         "observacao":
             (dadosEnriquecidos['observacao'] ?? convidado['observacao'] ?? '')
                 .toString(),
-        "fotobase64_1": '',
-        "fotobase64_2": '',
+        "fotobase64_1": fotoRostoClean,
+        "fotobase64_2": fotoDocClean,
       };
 
       final response = await http.post(
@@ -1407,53 +1437,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['status'] == 200) {
-          // --- CAPTURA DE FOTO PARA O PAYLOAD ---
-          final urlFoto = Uri.parse('${ApiConfig.gateUrl}/FotoRegistrar');
-
-          // 1. GRAVAR FOTO DO ROSTO (ordem_num: 1)
-          if (_fotoRostoEntrada != null && _fotoRostoEntrada!.isNotEmpty) {
-            final fotoRostoClean = _fotoRostoEntrada!.contains(',')
-                ? _fotoRostoEntrada!.split(',').last
-                : _fotoRostoEntrada!;
-
-            await http.post(
-              urlFoto,
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer $tokenSessao',
-              },
-              body: jsonEncode({
-                "condominio_id": condominioId,
-                "tipoUSU": "",
-                "ordem_num": 1, // 1 = Rosto
-                "pessoacadastro_id": pessoaCadastroId,
-                "foto": fotoRostoClean,
-              }),
-            );
-          }
-
-          // 2. GRAVAR FOTO DO DOCUMENTO (ordem_num: 2)
-          if (_fotoDocumentoEntrada != null &&
-              _fotoDocumentoEntrada!.isNotEmpty) {
-            final fotoDocClean = _fotoDocumentoEntrada!.contains(',')
-                ? _fotoDocumentoEntrada!.split(',').last
-                : _fotoDocumentoEntrada!;
-
-            await http.post(
-              urlFoto,
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer $tokenSessao',
-              },
-              body: jsonEncode({
-                "condominio_id": condominioId,
-                "tipoUSU": "",
-                "ordem_num": 2, // 2 = Documento
-                "pessoacadastro_id": pessoaCadastroId,
-                "foto": fotoDocClean,
-              }),
-            );
-          }
+          // 👇 NOVA LÓGICA: Captura o ID gerado pela API caso o local esteja zerado
 
           setState(() {
             _feedbackMessageEntrada = 'Entrada realizada com sucesso!';
@@ -1772,8 +1756,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       print('Erro ao verificar permissá£o: $e');
       if (!_enableSignalR) {
         // Plano Smart: manter inativo
-        print(
-            'âš ï¸ Erro, mas plano Smart detectado. Permissá£o permanece INATIVA.');
+        print('Erro, mas plano Smart detectado. Permissá£o permanece INATIVA.');
       } else {
         // SmartAccess: permitir o acesso (fallback)
         setState(() {
@@ -1886,12 +1869,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await _fetchCrachas();
     await _fetchUnidadesFiltro(); // Carregar unidades para filtro de entrada
     await _fetchEspacosSocial(); // Carregar espaá§os sociais para filtro de entrada
-    //await _fetchHistoricos();
-    await _fetchAgendamentos();
+
     await _fetchVeiculos();
     await _fetchVagas();
     await _checkBotoeiras();
-    await _buscarSaidasFiltradas();
+    //await _buscarSaidasFiltradas();
+    //await _fetchHistoricos();
+    //await _fetchAgendamentos();
     // Equipamentos carregados pelo EquipamentosFAB widget
 
     // Listener para atualizar UI quando documento muda
@@ -2017,7 +2001,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             // Verificar se já temos esse ID na lista atual. Se não tem, é novo e precisa disparar o update.
             bool isNovo = !_todasPassagens
                 .any((existing) => (existing['id']?.toString() ?? '') == id);
-            print('PassagemUpdateTela: ${id}');
             await SignalRService().PassagemUpdateTela(id);
           }
         }
@@ -2060,8 +2043,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (!_isUsingHistorico()) {
             _historicoFiltrado = _passagens;
           }
-          print(
-              '✅ [SignalR Update] Merge concluído: +$novos novos, $atualizados atualizados. Total: ${_todasPassagens.length}');
         });
       } catch (e) {
         print('🔴 [SignalR] Erro processamento main thread: $e');
@@ -2638,6 +2619,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required List<Widget> actions,
     Widget? extraContent,
     String? uniqueKey,
+    VoidCallback? onReveal,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bool isRevealed =
@@ -2676,8 +2658,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   topLeft: Radius.circular(11),
                   bottomLeft: Radius.circular(11),
                 ),
-                child:
-                    _buildCardPhoto(photoBase64, isDark, uniqueKey: uniqueKey),
+                child: _buildCardPhoto(
+                  photoBase64,
+                  isDark,
+                  uniqueKey: uniqueKey,
+                  onReveal: onReveal,
+                ),
               ),
             ),
             Expanded(
@@ -2693,10 +2679,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           setState(() {
                             _revealedPii.add('${uniqueKey}_nome');
                           });
+                          if (onReveal != null) onReveal();
                         }
                       },
                       child: Text(
-                        isRevealed ? title : _maskName(title),
+                        isRevealed ? title : Utilities.maskName(title),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -2738,12 +2725,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildCardPhoto(String? photoBase64, bool isDark,
-      {String? uniqueKey}) {
+      {String? uniqueKey, VoidCallback? onReveal}) {
+    // 👈 NOVO PARÂMETRO
     final bool isRevealed =
         uniqueKey != null && _revealedPii.contains(uniqueKey);
 
     Widget buildImage() {
-      print('DEBUG: photoBase64: $photoBase64');
       if (photoBase64 != null &&
           photoBase64.isNotEmpty &&
           photoBase64 != 'null') {
@@ -2781,6 +2768,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             setState(() {
               _revealedPii.add(uniqueKey);
             });
+            if (onReveal != null) onReveal(); // 👈 ADICIONE AQUI
           }
         },
         child: Stack(
@@ -2812,11 +2800,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return buildImage();
   }
 
-  // Painel 2 - Avulso + Agendamentos
   Widget _panelEntradaSaidas() {
     return DashboardCard(
       child: FocusScope(
-        key: _panelEntradaSaidasKey, // 👈 VINCULE A CHAVE REAL AQUI!
+        key: _panelEntradaSaidasKey,
         canRequestFocus: true,
         child: FocusTraversalGroup(
           policy: WidgetOrderTraversalPolicy(),
@@ -2825,31 +2812,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               // Segmented control: Avulso / Agendamentos / Saídas no topo
               SegmentedTabBar(
-                labels: const ['Avulso', 'Agendamentos', 'Saídas'],
+                labels: const ['Entrada', 'Agendamentos', 'Saídas'],
                 tooltips: const [
-                  'Entrada de avulsos',
+                  'Localize a pessoa para que seja realizada a entrada',
                   'Visitantes agendados pelo morador',
-                  'Saída de prestadores e visitantes'
+                  'Registrar a saída de avulsos'
                 ],
                 color: CupertinoColorsService.tabBar1,
                 selected: _tabAvulsoAgendamentosSaidas,
-                //hasFocus: _grupoEmFoco == 'EntradaSaidas',
                 hasFocus: false,
-                // --- 1. ENVIE A CONTAGEM PARA O BADGE NO ÍNDICE 1 ---
                 badges: {
-                  1: _agendamentos.length,
-                  2: _saidasPendentes.length,
+                  1: _getQuantidadeAgendamentos(),
+                  2: _getSaidasPendentesFiltradas().length,
                 },
                 onChanged: (i) {
                   setState(() {
+                    _agendamentos = [];
                     _tabAvulsoAgendamentosSaidas = i;
-                    _grupoEmFoco = 'EntradaSaidas'; // <- ADICIONE AQUI
+                    _grupoEmFoco = 'EntradaSaidas';
                     if (i == 2) {
-                      // Saídas - carregar API passagemhistorico
                       _buscarSaidasFiltradas();
                     } else {
-                      // Avulso (0) ou Agendamentos (1)
-                      // Limpar todos os campos ao trocar entre Avulso e Agendamentos
                       _filtroDocumentoEntradaController.clear();
                       _filtroNomeEntradaController.clear();
                       _filtroUnidadeEntradaController.clear();
@@ -2880,6 +2863,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           final id = espaco['espacopublico_id'] as int? ?? 0;
                           return _espacosSociaisSelecionadosFiltro[id] == true;
                         }).toList();
+                        final hoje = DateTime.now();
+                        setState(() {
+                          // 1. Atualiza as variáveis visuais do calendário
+                          _filtroDataInicioEntrada = hoje;
+                          _filtroDataFimEntrada = hoje;
+                          _erroDataEntrada = false;
+                        });
                         final espacosParaBusca = espacosSelecionados.isNotEmpty
                             ? espacosSelecionados
                             : _espacosSocialList;
@@ -2888,12 +2878,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       }
 
                       _filtroEntradaMinimizado = false;
-                      // Ao mudar para agendamentos, carregar espaá§os sociais se ainda não foram carregados
                       if (_espacosSocialList.isEmpty &&
                           !_loadingEspacosSocial) {
                         _buscarEspacosSociaisParaFiltro();
                       } else {
-                        // Se já foram carregados, apenas marcar todos os cards como selecionados
                         setState(() {
                           _espacosSociaisSelecionadosFiltro.clear();
                           for (final espaco in _espacosSocialList) {
@@ -2911,20 +2899,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Expanded(
                 child: _tabAvulsoAgendamentosSaidas == 2
                     ? _saidasList() // Mostrar lista de saídas
-                    : Column(
-                        children: [
-                          // Filtros (sempre visíveis)
-                          _buildFiltrosEntrada(),
-                          const SizedBox(height: 12),
-                          // Lista de Resultados Inline
-                          if (_convidadosResultados.isNotEmpty &&
-                              !_mostrarFormEntrada)
-                            Expanded(child: _buildListaConvidadosResultados()),
+                    : SingleChildScrollView(
+                        // 👈 ADICIONADO: Garante que os filtros possam expandir sem quebrar a tela
+                        child: Column(
+                          children: [
+                            // Filtros (sempre visíveis)
+                            _buildFiltrosEntrada(),
+                            const SizedBox(height: 12),
+                            // Lista de Resultados Inline
+                            if (_convidadosResultados.isNotEmpty &&
+                                !_mostrarFormEntrada)
+                              _buildListaConvidadosResultados(), // 👈 REMOVIDO O EXPANDED
 
-                          // Formulário de entrada (mostrado apenas quando não há busca ativa E form requisitado)
-                          if (_mostrarFormEntrada)
-                            Expanded(child: _entradaForm()),
-                        ],
+                            // Formulário de entrada
+                            if (_mostrarFormEntrada)
+                              _entradaForm(), // 👈 REMOVIDO O EXPANDED
+                          ],
+                        ),
                       ),
               ),
               if (_feedbackMessageEntrada.trim().isNotEmpty)
@@ -3078,22 +3069,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   '0') ??
           0;
       String tit_modal = "Novo Convidado";
+      _fotoRostoEntrada = null;
       if (reservaId > 0 && reservaconvidadoId > 0) {
         final completo =
             await _obterConvidadoCompleto(reservaId, reservaconvidadoId);
         if (completo != null) convidado = {...convidadoBase, ...completo};
         tit_modal = "Editar Convidado";
-      }
-
-      if (!mounted) return;
-
-      // Busca a foto em tempo real do banco de dados antes de abrir o painel
-      final pessoaId = _convertToValidId(convidado['pessoacadastro_id'] ??
-              convidado['pessoadocumento_id']) ??
-          0;
-      if (pessoaId > 0) {
-        await _buscarFotosAvulso(pessoaId, tipoUSU: 'AG');
-        if (_fotoRostoEntrada != null) convidado['foto'] = _fotoRostoEntrada;
       }
 
       if (!mounted) return;
@@ -3516,7 +3497,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 child: Text(
                                   _revealedPii.contains('${uniqueKey}_nome')
                                       ? nome
-                                      : _maskName(nome),
+                                      : Utilities.maskName(nome),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
@@ -3534,12 +3515,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               const SizedBox(height: 2),
                               if (documento.isNotEmpty)
                                 GestureDetector(
-                                  onTap: () => setState(() =>
-                                      _revealedPii.add('${uniqueKey}_doc')),
+                                  onTap: () async {
+                                    final key = '${uniqueKey}_doc';
+                                    final vaiRevelar =
+                                        !_revealedPii.contains(key);
+
+                                    setState(() {
+                                      if (vaiRevelar) {
+                                        _revealedPii.add(key);
+                                      } else {
+                                        _revealedPii.remove(key);
+                                      }
+                                    });
+
+                                    if (vaiRevelar) {
+                                      try {
+                                        final idStr =
+                                            await ApiConfig.getUsuarioId();
+                                        final nomeStr =
+                                            await ApiConfig.getUsuarioNome();
+                                        CondominioApi.registrarLogVisualizacao(
+                                            int.tryParse(
+                                                    idStr?.toString() ?? '0') ??
+                                                0,
+                                            nomeStr?.toString() ?? '',
+                                            documento // Correção: agora passa o 'documento' em vez de 'nome'
+                                            );
+                                      } catch (_) {}
+                                    }
+                                  },
                                   child: Text(
                                       _revealedPii.contains('${uniqueKey}_doc')
                                           ? documento
-                                          : _maskDocument(documento),
+                                          : Utilities.maskDocument(documento),
                                       style: TextStyle(
                                           color: getSecondaryTextColor(context),
                                           fontSize: 14,
@@ -3743,7 +3751,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
-    // --- 3. NOVA FUNÇÃO: LINHA COMPACTA SEM BORDA PARA AGENDAMENTOS ---
     Widget construirItemLinhaDoConvidado(Map<String, dynamic> convidado) {
       final uniqueKey = convidado['id']?.toString() ??
           convidado['reserva_id']?.toString() ??
@@ -3768,7 +3775,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         } catch (e) {}
       }
 
-      // 👇 CORREÇÃO AQUI: Faça o merge ANTES de ler as variáveis e dar os prints!
       if (dadosAtualizados != null) {
         convidado.addAll(dadosAtualizados);
       }
@@ -3790,44 +3796,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       final temErroFoto = _cardsComErroFoto.contains(uniqueKey);
 
-      // 👇 AGORA SIM, ESTAMOS LENDO DO OBJETO JÁ ATUALIZADO COM OS DADOS NOVOS!
-      final entradaStr =
-          (convidado['dt_entrada'] ?? convidado['entrada'] ?? '').toString();
-      final saidaStr =
-          (convidado['dt_saida'] ?? convidado['saida'] ?? '').toString();
-
-      bool jaDeuEntrada = entradaStr.isNotEmpty;
-      bool jaDeuSaida = saidaStr.isNotEmpty;
-
-      print('----------------------------------------------------------');
-      print('reservaId $reservaId');
-      print('nome $nome');
-      print('documento $documento');
-      print('foto $fotoParaExibir');
-      print('entrada $entradaStr');
-      print('saida $saidaStr');
-      print('temRestricao $temRestricao');
-      print('motivolista_ds $motivolista_ds');
-
-      // 👇 CORREÇÃO: Atualizamos a referência original em vez de criar um clone!
-      if (dadosAtualizados != null) {
-        convidado.addAll(dadosAtualizados);
-      }
-
-      Color photoBorderColor = Colors.transparent;
-      if (temRestricao)
-        photoBorderColor = CupertinoColorsService.destructiveRed;
-      else if (temErroFoto)
-        photoBorderColor = CupertinoColorsService.systemRed;
-      else if (jaDeuEntrada && !jaDeuSaida)
-        photoBorderColor = Colors.orange; // 👈 Agora vai funcionar!
-      else if (jaDeuEntrada && jaDeuSaida) photoBorderColor = Colors.green; //
-
       Widget buildPillBtn(IconData icon, Color color, String tooltipMessage,
           VoidCallback? onPressed,
           {bool isLoading = false}) {
         return Tooltip(
           message: tooltipMessage,
+          key: ValueKey('btn_pill_entrada_$tooltipMessage'),
           child: InkWell(
             onTap: isLoading ? null : onPressed, // Previne duplo clique
             borderRadius: BorderRadius.circular(20),
@@ -3847,6 +3821,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       }
 
+      // 👇 AGORA LÊ DIRETO DO OBJETO, SEM PRECISAR DE FUTUREBUILDER!
+      String entradaStr =
+          (objetoAcao['dt_entrada'] ?? objetoAcao['entrada'] ?? '').toString();
+      String saidaStr =
+          (objetoAcao['dt_saida'] ?? objetoAcao['saida'] ?? '').toString();
+
+      bool jaDeuEntrada = entradaStr.isNotEmpty;
+      bool jaDeuSaida = saidaStr.isNotEmpty;
+
+      Color photoBorderColor = Colors.transparent;
+      if (temRestricao) {
+        photoBorderColor = CupertinoColorsService.destructiveRed;
+      } else if (temErroFoto) {
+        photoBorderColor = CupertinoColorsService.systemRed;
+      } else if (jaDeuEntrada && !jaDeuSaida) {
+        photoBorderColor = Colors.orange;
+      } else if (jaDeuEntrada && jaDeuSaida) {
+        photoBorderColor = Colors.green;
+      }
+
       final List<Widget> pillBtns = [];
 
       // ÚNICO BOTÃO NA LISTA: ABRE O PAINEL DE EDIÇÃO E AÇÕES!
@@ -3855,7 +3849,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         abrirEdicaoNoPainel(objetoAcao);
       }));
 
-      // 👇 NOVA LÓGICA DE BOTÕES DE ENTRADA E SAÍDA DIRETOS NO LAYOUT
+      // 👇 LÓGICA DE BOTÕES DE ENTRADA E SAÍDA DIRETOS NO LAYOUT
       if (!jaDeuEntrada || (jaDeuEntrada && jaDeuSaida)) {
         pillBtns.add(buildPillBtn(Icons.login_rounded,
             CupertinoColorsService.activeGreen, 'Dar Entrada', () async {
@@ -3864,11 +3858,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           });
           try {
             await _realizarEntradaDireta(objetoAcao);
+
             final rId = objetoAcao['reserva_id']?.toString() ??
                 objetoAcao['id_pai']?.toString() ??
                 '';
             if (rId.isNotEmpty) {
-              final convidados = await _getConvidadosComMovimentacao(rId);
+              final convidados = await ConvidadosApi.ConvidadosList(rId);
               setState(() {
                 _convidadosPorReserva[rId] = convidados;
                 _quantidadeConvidados[rId] = convidados.length;
@@ -3879,8 +3874,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _loadingActionKeys.remove(entradaKey);
             });
           }
-        }, isLoading: _loadingActionKeys.contains(entradaKey) // Passa o status
-            ));
+        }, isLoading: _loadingActionKeys.contains(entradaKey)));
       } else if (jaDeuEntrada && !jaDeuSaida) {
         pillBtns.add(buildPillBtn(
             Icons.logout, CupertinoColorsService.systemRed, 'Dar Saída',
@@ -3905,7 +3899,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     context: context,
                     title: 'Sucesso',
                     message: 'Saída registrada!');
-                final convidados = await _getConvidadosComMovimentacao(rId);
+                final convidados = await ConvidadosApi.ConvidadosList(rId);
 
                 setState(() {
                   _convidadosPorReserva[rId] = convidados;
@@ -3919,23 +3913,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _loadingActionKeys.remove(saidaKey);
             });
           }
-        }, isLoading: _loadingActionKeys.contains(saidaKey) // Passa o status
-            ));
+        }, isLoading: _loadingActionKeys.contains(saidaKey)));
       }
-      final pillWidget = Container(
-        decoration: BoxDecoration(
-          // Fundo alterado para branco para destacar no fundo cinza
-          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(
-              color: isDark ? Colors.grey.shade800 : Colors.grey.shade300),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: pillBtns,
-        ),
-      );
 
       // Adicionando divisórias ("|") entre os ícones da pílula
       final List<Widget> separatedBtns = [];
@@ -3949,18 +3928,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       }
 
+      // 3. Retorna o layout final da linha
       return Padding(
         padding: const EdgeInsets.only(top: 8.0, bottom: 8.0, left: 16.0),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment
-              .center, // 👈 GARANTE ALINHAMENTO VERTICAL NO CENTRO
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             // 2. NOME, DOCUMENTO E MENSAGENS DE ERRO
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize:
-                    MainAxisSize.min, // 👈 OCUPA APENAS O ESPAÇO NECESSÁRIO
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   GestureDetector(
                     onTap: () =>
@@ -3976,22 +3954,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
-                      maxLines: 1, // 👈 IMPEDE QUEBRA DE LINHA DO NOME
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   if (documento.isNotEmpty)
                     GestureDetector(
-                      onTap: () =>
-                          setState(() => _revealedPii.add('${uniqueKey}_doc')),
+                      onTap: () async {
+                        final key = '${uniqueKey}_doc';
+                        final vaiRevelar = !_revealedPii.contains(key);
+
+                        setState(() {
+                          if (vaiRevelar) {
+                            _revealedPii.add(key);
+                          } else {
+                            _revealedPii.remove(key);
+                          }
+                        });
+
+                        if (vaiRevelar) {
+                          try {
+                            final idStr = await ApiConfig.getUsuarioId();
+                            final nomeStr = await ApiConfig.getUsuarioNome();
+                            CondominioApi.registrarLogVisualizacao(
+                                int.tryParse(idStr?.toString() ?? '0') ?? 0,
+                                nomeStr?.toString() ?? '',
+                                documento);
+                          } catch (_) {}
+                        }
+                      },
                       child: Text(
                         _revealedPii.contains('${uniqueKey}_doc')
                             ? documento
-                            : _maskDocument(documento),
+                            : Utilities.maskDocument(documento),
                         style: TextStyle(
                             color: getSecondaryTextColor(context),
                             fontSize: 14),
-                        maxLines: 1, // 👈 IMPEDE QUEBRA DE LINHA DO DOCUMENTO
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -4001,7 +4000,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Padding(
                       padding: const EdgeInsets.only(top: 2.0),
                       child: Row(
-                        // 👈 COLOCA AS MENSAGENS EM LINHA PARA NÃO EMPURRAR O CARD
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (temRestricao && motivolista_ds.isNotEmpty)
@@ -4038,15 +4036,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(width: 8),
 
             // 3. PILL MENU DE AÇÕES
-            // Ocultamos a pílula se o nome for apenas "Não Informado" ou equivalente
-            // para evitar interações inválidas, mas a pílula agora ficará alinhada perfeitamente ao centro!
-            pillWidget,
+            Container(
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(
+                    color:
+                        isDark ? Colors.grey.shade800 : Colors.grey.shade300),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: separatedBtns,
+              ),
+            ),
           ],
         ),
       );
     }
-
-    // --- RENDERIZAÇÃO PRINCIPAL ---
 
     // MODO AGENDAMENTOS: ESTRUTURA DE ÁRVORE COM LINHAS COMPACTAS
     if (_tabAvulsoAgendamentosSaidas == 1) {
@@ -4096,11 +4103,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             decoration: BoxDecoration(
               // Fundo cinza semelhante ao da imagem
               color: isDark
-                  ? Color(0xff393E44)
-                  : const Color.fromARGB(255, 245, 245, 245),
+                  ? CupertinoColorsService.systemFill
+                  : CupertinoColorsService.systemGrey6,
               borderRadius: BorderRadius.circular(12),
               // Borda verde
-              border: Border.all(color: const Color(0xFF388E3C), width: 2),
+              border:
+                  Border.all(color: CupertinoColorsService.tabBar1, width: 1),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -4181,9 +4189,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     base['id'] = 0;
                                     base['reservaconvidado_id'] = 0;
                                     base['nome'] = '';
-                                    base['documento'] = '';
+                                    base['documento_txt'] =
+                                        ''; // 👈 Limpa o documento_txt
+                                    base['foto'] = null; // 👈 Limpa a foto!
+                                    base['link_foto'] =
+                                        null; // 👈 Limpa o link da foto!
+                                    base['placa'] = ''; // 👈 Limpa a placa
+                                    base['modelo'] = ''; // 👈 Limpa o modelo
+                                    base['observacao'] =
+                                        ''; // 👈 Limpa a observação
                                     base['tipo'] = 'AG';
-
                                     // Chama o painel lateral em modo de criação
                                     abrirEdicaoNoPainel(base);
                                   }
@@ -4193,7 +4208,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 10, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color: CupertinoColorsService.white,
+                                    color: isDark
+                                        ? CupertinoColorsService.systemFill
+                                        : CupertinoColorsService.white,
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
                                       color: CupertinoColorsService.activeGreen
@@ -4304,8 +4321,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: SingleChildScrollView(
         child: Column(
           children: [
-            // Mensagem para novo usuário ou agendamento
-// Cabeçalho para feedback visual de estado
             if (_isNovoUsuario || _isAgendamento || _temCadastroAvulso)
               Container(
                 width: double.infinity,
@@ -4352,14 +4367,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       // Documento
                       CharacterCounterField(
                         controller: _documentoController,
-                        maxLength: 14,
+                        maxLength:
+                            14, // (ou 18 se já estiver usando a máscara do CNPJ)
                         labelText: 'Documento',
                         focusNode: _documentoFocusNode,
                         style: const TextStyle(fontSize: 16),
                         keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly
-                        ],
+
+                        // 👇 A SOLUÇÃO: Use apenas enabled: false para bloquear totalmente o campo
+                        enabled: false,
+
                         decoration: _getInputDecoration(
                           context,
                           'Documento',
@@ -4527,12 +4544,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             flex: 3,
                             child: CharacterCounterField(
                               controller: _documentoController,
-                              maxLength: 14,
+                              maxLength: 18,
                               labelText: 'Documento',
+                              enabled: false,
                               focusNode: _documentoFocusNode,
                               keyboardType: TextInputType.number,
                               inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly
+                                DocumentoFormatter(),
                               ],
                               decoration: _getInputDecoration(
                                 context,
@@ -5640,17 +5658,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
   // Painel 2 - Passagens / Histórico
 
+  int _getQuantidadeAgendamentos() {
+    // Filtra apenas os registros que pertencem à aba de Agendamentos (origem_tab == 1)
+    final agendamentosNaTela = _convidadosResultados
+        .where((c) => (c['origem_tab'] ?? 0) == 1)
+        .toList();
+
+    // Se a busca ainda não foi feita ou a aba foi limpa, faz o fallback para o total original
+    if (agendamentosNaTela.isEmpty) {
+      return _agendamentos.length;
+    }
+
+    // Conta a quantidade de Agendamentos únicos (reserva_id)
+    // já que um único agendamento pode ter múltiplos convidados
+    final reservasUnicas = agendamentosNaTela
+        .map(
+            (c) => c['reserva_id']?.toString() ?? c['id_pai']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
+    return reservasUnicas.isNotEmpty
+        ? reservasUnicas.length
+        : agendamentosNaTela.length;
+  }
+
   List<Map<String, dynamic>> _getSaidasPendentesFiltradas() {
+    // 👇 NOVO: Primeiro, filtramos a lista inteira para garantir que SÓ contenha tipo 'AV' (Avulsos)
+    final avulsosPendentes =
+        _saidasPendentes.where((p) => p['tipo'] == 'AV').toList();
+
     if (_filtroNomeSaidasController.text.trim().isEmpty &&
         _filtroDocumentoSaidasController.text.trim().isEmpty &&
         _filtroPlacaSaidasController.text.trim().isEmpty &&
         _filtroUnidadeSaidasController.text.trim().isEmpty &&
         _filtroDataInicioSaidas == null &&
         _filtroDataFimSaidas == null) {
-      return _saidasPendentes; // 👈 Consome apenas o estado isolado
+      return avulsosPendentes; // 👈 Consome apenas o estado de avulsos filtrados
     }
 
-    return _saidasPendentes.where((passagem) {
+    return avulsosPendentes.where((passagem) {
       if (_filtroNomeSaidasController.text.trim().isNotEmpty) {
         final nome = (passagem['nome'] ?? '').toString().toLowerCase();
         if (!nome
@@ -5755,24 +5801,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _saidasList() {
-    return Expanded(
+    return SingleChildScrollView(
+      // 👈 ADICIONADO: Resolve o overflow do FilterTab
       child: Column(
         children: [
           // Formulário de saída (agora com o FilterTab sanfona Verde)
           RepaintBoundary(
             key: const ValueKey('filtros_saidas'),
             child: FilterTab(
-              title: 'Filtros de Saídas',
-              themeColor:
-                  CupertinoColorsService.tabBar1, // Verde (padrão desta coluna)
+              title: 'Filtros para registrar saídas avulsas.',
+              themeColor: CupertinoColorsService.tabBar1,
               icon: Icons.tune,
               initiallyExpanded: true,
               content: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Campos de busca e filtros
-                  // Primeira linha: Documento (linha inteira)
                   Row(
                     children: [
                       Expanded(
@@ -5784,14 +5828,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           decoration: _getInputDecoration(
                               context, 'Documento', 'documento_saidas'),
                           enableInteractiveSelection: true,
+                          inputFormatters: [
+                            DocumentoFormatter(),
+                          ],
                           readOnly: false,
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
-
-                  // Segunda linha: Nome e Sobrenome (linha inteira)
                   Row(
                     children: [
                       Expanded(
@@ -5809,8 +5854,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-
-                  // Terceira linha: Placa + Unidade lado a lado
                   Row(
                     children: [
                       Expanded(
@@ -5841,8 +5884,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-
-                  // Terceira linha: Período (ocupando largura total)
                   _buildPeriodFilter(
                     context: context,
                     startDate: _filtroDataInicioSaidas,
@@ -5853,8 +5894,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         setState(() => _filtroDataFimSaidas = date),
                   ),
                   const SizedBox(height: 12),
-
-                  // Quarta linha: Botões de ação
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -5872,7 +5911,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               _filtroDataInicioSaidas = null;
                               _filtroDataFimSaidas = null;
                             });
-                            _buscarSaidasFiltradas(); // 👈 Refaz a busca dos que estão dentro
+                            _buscarSaidasFiltradas();
                           },
                         ),
                         IconActionData(
@@ -5882,20 +5921,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           onPressed: _buscarSaidasFiltradas,
                           isLoading: _loadingSaidasList,
                         ),
-                        /*
-                        IconActionData(
-                          icon: Symbols.assignment_turned_in,
-                          tooltip: 'Auto baixa (selecionar múltiplas)',
-                          onPressed: () {
-                            setState(() {
-                              _modoAutoBaixa = !_modoAutoBaixa;
-                              if (!_modoAutoBaixa) {
-                                _itensSelecionados.clear();
-                              }
-                            });
-                          },
-                        ),
-                        */
                       ]),
                     ],
                   ),
@@ -5906,7 +5931,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           const SizedBox(height: 12),
 
-          // Botão de baixa em lote quando há itens selecionados
+          // Botão de baixa em lote
           if (_modoAutoBaixa && _itensSelecionados.isNotEmpty) ...[
             SizedBox(
               width: double.infinity,
@@ -5921,10 +5946,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
+                            strokeWidth: 2, color: Colors.white))
                     : const Icon(Icons.assignment_turned_in),
                 label: Text(_loadingPassagens
                     ? 'Processando...'
@@ -5943,168 +5965,178 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 12),
           ],
 
-          Expanded(
-            child: _loadingSaidasList
-                ? const Center(child: CircularProgressIndicator())
-                : _getSaidasPendentesFiltradas().isEmpty // 👈 ALTERADO
-                    ? const SizedBox.shrink()
-                    : ListView.separated(
-                        itemCount: _getSaidasPendentesFiltradas()
-                            .length, // 👈 ALTERADO
-                        separatorBuilder: (_, __) => const SizedBox.shrink(),
-                        itemBuilder: (context, index) {
-                          final passagem = _getSaidasPendentesFiltradas()[
-                              index]; // 👈 ALTERADO
-                          final temSaida = (passagem['dt_saida'] ?? '')
-                              .toString()
-                              .isNotEmpty;
-                          final isAtiva = !temSaida;
+          // 👈 REMOVIDO O EXPANDED AQUI TAMBÉM
+          _loadingSaidasList
+              ? const Center(child: CircularProgressIndicator())
+              : _getSaidasPendentesFiltradas().isEmpty
+                  ? const SizedBox.shrink()
+                  : ListView.separated(
+                      shrinkWrap:
+                          true, // 👈 ADICIONADO: Permite que a lista dite sua própria altura dentro do ScrollView
+                      physics:
+                          const NeverScrollableScrollPhysics(), // 👈 ADICIONADO: Evita conflito de scrolls
+                      itemCount: _getSaidasPendentesFiltradas().length,
+                      separatorBuilder: (_, __) => const SizedBox.shrink(),
+                      itemBuilder: (context, index) {
+                        final passagem = _getSaidasPendentesFiltradas()[index];
+                        final temSaida =
+                            (passagem['dt_saida'] ?? '').toString().isNotEmpty;
+                        final isAtiva = !temSaida;
 
-                          return _modoAutoBaixa && isAtiva
-                              ? _listItemComCheckbox(
-                                  passagem: passagem,
-                                  index: index,
-                                  isSelected:
-                                      _itensSelecionados.contains(index),
-                                  onChanged: (selected) {
-                                    setState(() {
-                                      if (selected) {
-                                        _itensSelecionados.add(index);
-                                      } else {
-                                        _itensSelecionados.remove(index);
-                                      }
-                                    });
-                                  },
-                                )
-                              : _buildSaidaCard(
-                                  context: context,
-                                  uniqueKey:
-                                      'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? index}',
-                                  title: '${passagem['nome'] ?? 'Visitante'}',
-                                  subtitle:
-                                      '${passagem['destino'] ?? 'Torre Unidade'}${passagem['destino'] != null ? ', ' : ''}${_getTipoFormatado(passagem)}',
-                                  photoBase64: (passagem['link_foto'] ??
-                                          passagem['foto'])
-                                      ?.toString(), // API passagemhistorico: link_foto é a foto
-                                  extraContent: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      if (passagem['documento'] != null &&
-                                          passagem['documento']
-                                              .toString()
-                                              .isNotEmpty)
-                                        GestureDetector(
-                                          onTap: () {
-                                            setState(() {
-                                              final key =
-                                                  'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? index}_doc';
-                                              if (_revealedPii.contains(key)) {
-                                                _revealedPii.remove(key);
-                                              } else {
-                                                _revealedPii.add(key);
-                                              }
-                                            });
-                                          },
-                                          child: Text(
-                                            _revealedPii.contains('Doc: '
-                                                    'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? index}_doc')
-                                                ? passagem['documento']
-                                                    .toString()
-                                                : (passagem['documento']
-                                                            .toString()
-                                                            .length >
-                                                        3
-                                                    ? '${passagem['documento'].toString().substring(0, 3)}...'
-                                                    : '***'),
-                                            style: TextStyle(
-                                              color: getSecondaryTextColor(
-                                                  context),
-                                              fontSize: 12,
-                                            ),
+                        return _modoAutoBaixa && isAtiva
+                            ? _listItemComCheckbox(
+                                passagem: passagem,
+                                index: index,
+                                isSelected: _itensSelecionados.contains(index),
+                                onChanged: (selected) {
+                                  setState(() {
+                                    if (selected) {
+                                      _itensSelecionados.add(index);
+                                    } else {
+                                      _itensSelecionados.remove(index);
+                                    }
+                                  });
+                                },
+                              )
+                            : _buildSaidaCard(
+                                context: context,
+                                uniqueKey:
+                                    'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? index}',
+                                title: '${passagem['nome'] ?? 'Visitante'}',
+                                // 👇 NOVO: Adicionando o tipodescricao no final do subtítulo de saídas
+                                subtitle:
+                                    '${passagem['destino'] ?? 'Torre Unidade'}${passagem['destino'] != null ? ', ' : ''}${_getTipoFormatado(passagem)}${passagem['tipodescricao'] != null && passagem['tipodescricao'].toString().isNotEmpty ? ' - ' + passagem['tipodescricao'].toString() : ''}',
+                                photoBase64:
+                                    (passagem['link_foto'] ?? passagem['foto'])
+                                        ?.toString(),
+                                extraContent: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (passagem['documento'] != null &&
+                                        passagem['documento']
+                                            .toString()
+                                            .isNotEmpty)
+                                      GestureDetector(
+                                        onTap: () async {
+                                          final docString =
+                                              passagem['documento'].toString();
+                                          final key =
+                                              'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? index}_doc';
+                                          final vaiRevelar =
+                                              !_revealedPii.contains(key);
+
+                                          setState(() {
+                                            if (vaiRevelar) {
+                                              _revealedPii.add(key);
+                                            } else {
+                                              _revealedPii.remove(key);
+                                            }
+                                          });
+
+                                          if (vaiRevelar) {
+                                            try {
+                                              final idStr = await ApiConfig
+                                                  .getUsuarioId();
+                                              final nomeStr = await ApiConfig
+                                                  .getUsuarioNome();
+                                              CondominioApi
+                                                  .registrarLogVisualizacao(
+                                                      int.tryParse(idStr
+                                                                  ?.toString() ??
+                                                              '0') ??
+                                                          0,
+                                                      nomeStr?.toString() ?? '',
+                                                      docString);
+                                            } catch (_) {}
+                                          }
+                                        },
+                                        child: Text(
+                                          _revealedPii.contains(
+                                                  'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? index}_doc')
+                                              ? passagem['documento'].toString()
+                                              : Utilities.maskDocument(
+                                                  passagem['documento']
+                                                      .toString()),
+                                          style: TextStyle(
+                                            color:
+                                                getSecondaryTextColor(context),
+                                            fontSize: 14,
                                           ),
                                         ),
-                                      const SizedBox(height: 2),
+                                      ),
+                                    const SizedBox(height: 2),
+                                    Row(
+                                      children: [
+                                        Text(
+                                          'E: ${passagem['dt_ini'] ?? ''}',
+                                          style: const TextStyle(
+                                              color: Colors.green,
+                                              fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                    if (temSaida) ...[
                                       Row(
                                         children: [
+                                          const SizedBox(width: 0),
                                           Text(
-                                            'E: ${passagem['dt_ini'] ?? ''}',
+                                            'S: ${passagem['dt_saida'] ?? ''}',
                                             style: const TextStyle(
-                                                color: Colors.green,
+                                                color: CupertinoColorsService
+                                                    .systemRed,
                                                 fontSize: 12),
                                           ),
                                         ],
                                       ),
-                                      if (temSaida) ...[
-                                        Row(
-                                          children: [
-                                            const SizedBox(width: 0),
-                                            Text(
-                                              'S: ${passagem['dt_saida'] ?? ''}',
-                                              style: const TextStyle(
-                                                  color: CupertinoColorsService
-                                                      .systemRed,
-                                                  fontSize: 12),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                      if (passagem['placa'] != null &&
-                                          passagem['placa']
-                                              .toString()
-                                              .isNotEmpty)
-                                        Padding(
-                                          padding:
-                                              const EdgeInsets.only(top: 2),
-                                          child: Text(
-                                            'Veículo: ${passagem['placa']}',
-                                            style: const TextStyle(
-                                                color: Colors.blue,
-                                                fontSize: 12),
-                                          ),
-                                        ),
                                     ],
-                                  ),
-                                  actions: !temSaida &&
-                                          !_cardsExpandidos.contains(
-                                              'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? ''}')
-                                      ? [
-                                          IconActionData(
-                                            icon: _loadingSaidas.contains(
-                                                    passagem['id']
-                                                            ?.toString() ??
-                                                        passagem['passagem_id']
-                                                            ?.toString())
-                                                ? Icons.hourglass_empty
-                                                : Icons.logout,
-                                            tooltip: _loadingSaidas.contains(
-                                                    passagem['id']
-                                                            ?.toString() ??
-                                                        passagem['passagem_id']
-                                                            ?.toString())
-                                                ? 'Processando saída...'
-                                                : 'Registrar saída',
-                                            onPressed: _loadingSaidas.contains(
-                                                    passagem['id']
-                                                            ?.toString() ??
-                                                        passagem['passagem_id']
-                                                            ?.toString())
-                                                ? () {}
-                                                : () => _mostrarOpcoesSaida(
-                                                    passagem),
-                                            color: CupertinoColorsService
-                                                .systemRed,
-                                          ),
-                                        ]
-                                      : [],
-                                  isExpanded: !temSaida &&
-                                      _cardsExpandidos.contains(
-                                          'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? ''}'),
-                                  passagem: passagem,
-                                );
-                        },
-                      ),
-          ),
+                                    if (passagem['placa'] != null &&
+                                        passagem['placa'].toString().isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(
+                                          'Veículo: ${passagem['placa']}',
+                                          style: const TextStyle(
+                                              color: Colors.blue, fontSize: 12),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                actions: !temSaida &&
+                                        !_cardsExpandidos.contains(
+                                            'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? ''}')
+                                    ? [
+                                        IconActionData(
+                                          icon: _loadingSaidas.contains(
+                                                  passagem['id']?.toString() ??
+                                                      passagem['passagem_id']
+                                                          ?.toString())
+                                              ? Icons.hourglass_empty
+                                              : Icons.logout,
+                                          tooltip: _loadingSaidas.contains(
+                                                  passagem['id']?.toString() ??
+                                                      passagem['passagem_id']
+                                                          ?.toString())
+                                              ? 'Processando saída...'
+                                              : 'Registrar saída',
+                                          onPressed: _loadingSaidas.contains(
+                                                  passagem['id']?.toString() ??
+                                                      passagem['passagem_id']
+                                                          ?.toString())
+                                              ? () {}
+                                              : () =>
+                                                  _mostrarOpcoesSaida(passagem),
+                                          color:
+                                              CupertinoColorsService.systemRed,
+                                        ),
+                                      ]
+                                    : [],
+                                isExpanded: !temSaida &&
+                                    _cardsExpandidos.contains(
+                                        'saida_${passagem['id']?.toString() ?? passagem['passagem_id']?.toString() ?? ''}'),
+                                passagem: passagem,
+                              );
+                      },
+                    ),
         ],
       ),
     );
@@ -6133,7 +6165,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final bool isPhotoMasked =
         uniqueKey != null && !_revealedPii.contains('${uniqueKey}_photo');
 
-    final String displayedTitle = isNameMasked ? _maskName(title) : title;
+    final String displayedTitle =
+        isNameMasked ? Utilities.maskName(title) : title;
 
     // Placeholder content
     Widget photoContainer;
@@ -7412,7 +7445,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final tokenSessao = (encrypted != null && encrypted.isNotEmpty)
         ? decryptText(encrypted)
         : '';
-    final documento = _documentoController.text.trim();
+    final documento =
+        Utilities.removerPontuacao(_documentoController.text.trim());
     if (documento.isEmpty) {
       return;
     }
@@ -7687,44 +7721,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await buscarPorOrdem(2);
   }
 
-  Future<List<dynamic>> _getConvidadosComMovimentacao(String reservaId,
-      [String? reservaConvidadoId]) async {
-    // 1. Busca a lista original (repassando o parâmetro opcional)
-// 1. Busca a lista original (repassando o parâmetro opcional)
-    final convidados =
-        await ConvidadosApi.ConvidadosList(reservaId, reservaConvidadoId);
-
-    try {
-      // 2. Busca as movimentações de entrada e saída (repassando o parâmetro opcional)
-      final movimentos = await ConvidadosApi.ConvidadosEntradaSaida(
-          reservaId, reservaConvidadoId);
-
-      // 3. Faz o merge dos dados de movimentação para dentro dos convidados
-      for (var c in convidados) {
-        final rcId =
-            c['reservaconvidado_id']?.toString() ?? c['id']?.toString();
-
-        // Encontra o movimento correspondente a esse convidado
-        final mov = movimentos.lastWhere(
-          (m) => m['reservaconvidado_id']?.toString() == rcId,
-          orElse: () => null,
-        );
-
-        if (mov != null) {
-          // Sobrescreve as variáveis que controlam o visual (jaDeuEntrada / jaDeuSaida)
-          c['entrada'] = mov['dt_entrada'];
-          c['dt_entrada'] = mov['dt_entrada'];
-          c['saida'] = mov['dt_saida'];
-          c['dt_saida'] = mov['dt_saida'];
-        }
-      }
-    } catch (e) {
-      print('Erro ao buscar entrada/saída para a reserva $reservaId: $e');
-    }
-
-    return convidados;
-  }
-
   // Atualizar cadastro avulso via API editacadastro (chamado quando campos perdem foco)
   Future<void> _atualizarCadastroAvulso() async {
     final prefs = await SharedPreferences.getInstance();
@@ -7734,7 +7730,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         : '';
     if (tokenSessao.isEmpty) return;
 
-    final doc = _documentoController.text.trim();
+    final doc = Utilities.removerPontuacao(_documentoController.text.trim());
     final nome = _nomeController.text.trim().isNotEmpty
         ? _nomeController.text.trim()
         : '';
@@ -7750,6 +7746,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (doc.isEmpty) {
       return;
     }
+    if (!Utilities.isDocumentoValido(doc)) return;
 
     _setAtualizandoCadastro(true);
 
@@ -7848,8 +7845,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           text: _cadastroAvulso?['nome'] ?? '',
         );
         final TextEditingController docCtrl = TextEditingController(
-          text:
-              _cadastroAvulso?['documento'] ?? _documentoController.text.trim(),
+          text: Utilities.removerPontuacao(_cadastroAvulso?['documento'] ??
+              _documentoController.text.trim()),
         );
         final TextEditingController tipoCtrl = TextEditingController(
           text: _cadastroAvulso?['tipodoc'] ?? '',
@@ -7948,7 +7945,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   _ultimoPessoadocumentoId ??
                                   0,
                           "nome": nomeCtrl.text.trim(),
-                          "documento": docCtrl.text.trim(),
+                          "documento":
+                              Utilities.removerPontuacao(docCtrl.text.trim()),
                           "tipodoc": tipoCtrl.text.trim().isEmpty
                               ? 'R'
                               : tipoCtrl.text.trim(),
@@ -8051,7 +8049,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final payloadEdit = <String, dynamic>{
       "pessoadocumento_id": validFinalId,
       "tipodoc": 'R',
-      "documento": doc,
+      "documento": Utilities.removerPontuacao(doc),
       "nome": nome,
       "email": _cadastroAvulso?['email'] ?? '',
       "empresa": _empresaController.text.trim(),
@@ -8302,11 +8300,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     // 1. Definimos o título e a cor dinamicamente com base na aba atual
     String titulo = _tipoFiltroEntrada == 0
-        ? 'Filtros de Avulso'
+        ? 'Localize a pessoa'
         : 'Filtros de Agendamentos';
 
     if (_tipoFiltroEntrada == 0) {
-      titulo = 'Filtros de Avulso';
+      titulo = 'Localize a pessoa';
     } else if (_tipoFiltroEntrada == 1) {
       titulo = 'Filtros de Agendamentos';
     } else {
@@ -8329,52 +8327,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // Campos baseados no tipo selecionado
           if (_tipoFiltroEntrada == 0) ...[
             // Modo Avulso: Documento e Nome
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: CharacterCounterField(
-                    controller: _filtroDocumentoEntradaController,
-                    labelText:
-                        _tipoFiltroEntrada == 0 ? 'Documento' : 'Documento',
-                    maxLength: 14,
-                    decoration: _getInputDecorationComErro(
-                      context,
-                      _tipoFiltroEntrada == 0 ? 'Documento' : 'Documento',
-                      'documento_entrada',
-                      _erroDocumentoEntrada,
+                // 👇 NOVO: Texto explicativo antes do campo Documento
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0, left: 4.0),
+                  child: Text(
+                    'Informe o documento (ou nome) para localizar um agendamento ou registrar uma nova entrada avulsa.',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? CupertinoColorsService.systemGrey6
+                          : CupertinoColorsService.black,
                     ),
-                    enableInteractiveSelection: true,
-                    readOnly: false,
-                    onChanged: (value) {
-                      setState(() {
-                        if (_erroDocumentoEntrada && value.trim().isNotEmpty) {
-                          _erroDocumentoEntrada = false;
-                        }
-                        if (value.trim().isNotEmpty &&
-                            _tipoFiltroEntrada == 0) {
-                          _erroNomeEntrada = false;
-                        }
-                      });
-                    },
-                    onSubmitted: (value) {
-                      if (_tipoFiltroEntrada == 0) {
-                        _pesquisarAvulsoDiretoFormulario(); // Redireciona direto pro form
-                      } else {
-                        if (value.trim().isNotEmpty) {
-                          setState(() {
-                            _erroDocumentoEntrada = false;
-                            _erroNomeEntrada = false;
-                            _filtroEntradaMinimizado = false;
-                          });
-                          _buscarEntradasFiltradas(); // Fluxo de Agendamento mantém cards
-                        } else {
-                          setState(() {
-                            _erroDocumentoEntrada = true;
-                          });
-                        }
-                      }
-                    },
                   ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: CharacterCounterField(
+                        controller: _filtroDocumentoEntradaController,
+                        labelText:
+                            _tipoFiltroEntrada == 0 ? 'Documento' : 'Documento',
+                        maxLength: 14,
+                        decoration: _getInputDecorationComErro(
+                          context,
+                          _tipoFiltroEntrada == 0 ? 'Documento' : 'Documento',
+                          'documento_entrada',
+                          _erroDocumentoEntrada,
+                        ),
+                        enableInteractiveSelection: true,
+                        readOnly: false,
+                        onChanged: (value) {
+                          setState(() {
+                            if (_erroDocumentoEntrada &&
+                                value.trim().isNotEmpty) {
+                              _erroDocumentoEntrada = false;
+                            }
+                            if (value.trim().isNotEmpty &&
+                                _tipoFiltroEntrada == 0) {
+                              _erroNomeEntrada = false;
+                            }
+                          });
+                        },
+                        onSubmitted: (value) {
+                          if (_tipoFiltroEntrada == 0) {
+                            _pesquisarAvulsoDiretoFormulario(); // Redireciona direto pro form
+                          } else {
+                            if (value.trim().isNotEmpty) {
+                              setState(() {
+                                _erroDocumentoEntrada = false;
+                                _erroNomeEntrada = false;
+                                _filtroEntradaMinimizado = false;
+                              });
+                              _buscarEntradasFiltradas(); // Fluxo de Agendamento mantém cards
+                            } else {
+                              setState(() {
+                                _erroDocumentoEntrada = true;
+                              });
+                            }
+                          }
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -8527,6 +8546,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       'documento_entrada',
                       _erroDocumentoEntrada,
                     ),
+                    inputFormatters: [
+                      DocumentoFormatter(),
+                    ],
                     enableInteractiveSelection: true,
                     readOnly: false,
                     onChanged: (value) {
@@ -8630,28 +8652,83 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            _buildPeriodFilter(
-              context: context,
-              startDate: _filtroDataInicioEntrada,
-              endDate: _filtroDataFimEntrada,
-              hintText: 'período *',
-              temErro: _erroDataEntrada,
-              onStartDateChanged: (date) {
-                setState(() {
-                  _filtroDataInicioEntrada = date;
-                  if (date != null) {
-                    _erroDataEntrada = false;
-                  }
-                });
-              },
-              onEndDateChanged: (date) {
-                setState(() {
-                  _filtroDataFimEntrada = date;
-                  if (date != null) {
-                    _erroDataEntrada = false;
-                  }
-                });
-              },
+            // 👇 AQUI COMEÇA A ROW COM O BOTÃO "HOJE" (PILL) E O CALENDÁRIO
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                InkWell(
+                  onTap: () {
+                    final hoje = DateTime.now();
+                    setState(() {
+                      // 1. Atualiza as variáveis visuais do calendário
+                      _filtroDataInicioEntrada = hoje;
+                      _filtroDataFimEntrada = hoje;
+                      _erroDataEntrada = false;
+                    });
+
+                    // 2. Aciona o filtro de Agendamentos diretamente
+                    final espacosSelecionados =
+                        _espacosSocialList.where((espaco) {
+                      final id = espaco['espacopublico_id'] as int? ?? 0;
+                      return _espacosSociaisSelecionadosFiltro[id] == true;
+                    }).toList();
+                    final espacosParaBusca = espacosSelecionados.isNotEmpty
+                        ? espacosSelecionados
+                        : _espacosSocialList;
+
+                    _buscarAgendamentosEntradaFiltrados(
+                        espacosSelecionados: espacosParaBusca);
+                  },
+                  borderRadius: BorderRadius.circular(10), // 👈 Design de Pill
+                  child: Container(
+                    height: 38,
+                    width: 60,
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    decoration: BoxDecoration(
+                      color: CupertinoColorsService.tabBar1,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: CupertinoColorsService.tabBar1.withOpacity(0),
+                      ),
+                    ),
+                    child: const Text(
+                      'Hoje',
+                      style: TextStyle(
+                        color: CupertinoColorsService.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildPeriodFilter(
+                    context: context,
+                    startDate: _filtroDataInicioEntrada,
+                    endDate: _filtroDataFimEntrada,
+                    hintText: 'período *',
+                    temErro: _erroDataEntrada,
+                    onStartDateChanged: (date) {
+                      setState(() {
+                        _filtroDataInicioEntrada = date;
+                        if (date != null) {
+                          _erroDataEntrada = false;
+                        }
+                      });
+                    },
+                    onEndDateChanged: (date) {
+                      setState(() {
+                        _filtroDataFimEntrada = date;
+                        if (date != null) {
+                          _erroDataEntrada = false;
+                        }
+                      });
+                    },
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             Container(
@@ -8682,10 +8759,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _filtroDocumentoEntradaController.clear();
                       _filtroUnidadeEntradaController.clear();
                       _filtroNomeEntradaController.clear();
+                      final hoje = DateTime.now();
+
                       setState(() {
                         _filtroDataEntrada = null;
-                        _filtroDataInicioEntrada = null;
-                        _filtroDataFimEntrada = null;
+                        _filtroDataInicioEntrada = hoje;
+                        _filtroDataFimEntrada = hoje;
                         _unidadeFiltroSelecionada = null;
                         _unidadeFiltroAplicada = null;
                         _espacoSocialSelecionado = null;
@@ -9251,7 +9330,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _filtroAptoIdHistorico ?? 0, // 👈 Substitua o 0 por esta variável
         "condominio_id": int.tryParse(condominioId) ?? 0,
         "nome": _filtroNomeHistoricoController.text.trim(),
-        "documento": _filtroDocumentoHistoricoController.text.trim(),
+        "documento": Utilities.removerPontuacao(
+            _filtroDocumentoHistoricoController.text.trim()),
         "placa": _filtroPlacaHistoricoController.text.trim(),
         "naosairam": naosairam
       };
@@ -9283,17 +9363,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           final historico = List<Map<String, dynamic>>.from(data['data'] ?? []);
-
-          // Opcional: ordenar sempre pelo registro mais recente (maior data)
-          historico.sort((a, b) {
-            final dataA = _parseDateTime(
-                    a['data']?.toString() ?? a['dt_ini']?.toString() ?? '') ??
-                DateTime(2000);
-            final dataB = _parseDateTime(
-                    b['data']?.toString() ?? b['dt_ini']?.toString() ?? '') ??
-                DateTime(2000);
-            return dataB.compareTo(dataA);
-          });
 
           setState(() {
             _historicoFiltrado = historico;
@@ -9337,9 +9406,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     // Para cada registro AV, tentar buscar informaá§ões do cadastro avulso
     for (final passagem in registrosAV) {
-      final documento = passagem['documento']?.toString() ??
-          passagem['pessoaveiculo']?.toString() ??
-          '';
+      final documento = Utilities.removerPontuacao(
+          passagem['documento']?.toString() ??
+              passagem['pessoaveiculo']?.toString() ??
+              '');
       if (documento.isEmpty) continue;
 
       try {
@@ -9357,7 +9427,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
         final payloadList = {
           "condominio_id": condominioIdAtual,
-          "documento": documento,
+          "documento": Utilities.removerPontuacao(documento),
         };
 
         final responseList = await http.post(
@@ -9414,7 +9484,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         "apto_id": 0,
         "condominio_id": int.tryParse(condominioId) ?? 0,
         "nome": _filtroNomeSaidasController.text.trim(),
-        "documento": _filtroDocumentoSaidasController.text.trim(),
+        "documento": Utilities.removerPontuacao(
+            _filtroDocumentoSaidasController.text.trim()),
         "placa": _filtroPlacaSaidasController.text.trim(),
         "naosairam": true
       };
@@ -9492,11 +9563,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // BUSCA DIRETA PARA O FORMULÁRIO (ABA AVULSO)
   // -------------------------------------------------------------
   Future<void> _pesquisarAvulsoDiretoFormulario() async {
-    final documento = _filtroDocumentoEntradaController.text.trim();
+    final documento = Utilities.removerPontuacao(
+        _filtroDocumentoEntradaController.text.trim());
     final nome = _filtroNomeEntradaController.text.trim();
     int pessoacadastroId = 0;
 
-    if (documento.length < 3 && nome.isEmpty) {
+    if (documento.length == 0 && nome.isEmpty) {
       FeedbackUtils.showWarning(
           context: context,
           title: 'Atenção',
@@ -9505,6 +9577,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (documento.isEmpty) _erroDocumentoEntrada = true;
         if (nome.isEmpty) _erroNomeEntrada = true;
       });
+      return;
+    }
+
+    if (documento.isNotEmpty && !Utilities.isDocumentoValido(documento)) {
+      FeedbackUtils.showWarning(
+          context: context,
+          title: 'Documento Inválido',
+          message: 'O documento preenchido não é um CPF, CNPJ ou RG válido.');
+      setState(() => _erroDocumentoEntrada = true);
       return;
     }
 
@@ -9541,7 +9622,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           'condominio_id': int.tryParse(condominioId) ?? 0,
           'apto_id': 0,
           'nome': nome,
-          'documento': documento,
+          'documento': Utilities.removerPontuacao(documento),
           'dt_ini': null,
           'dt_fim': null,
           'tipoagendamento': 'S,H,M,A,P,R,K,',
@@ -9674,6 +9755,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _placaController.text = _cadastroAvulso!['placa']?.toString() ?? '';
         _modeloController.text = _cadastroAvulso!['modelo']?.toString() ?? '';
         _obsController.text = _cadastroAvulso!['obs']?.toString() ?? '';
+
+        // Resgata o nome para verificar se está em branco
+        final nomeLocalizado =
+            (_cadastroAvulso!['nome'] ?? '').toString().trim();
+
+        // 👇 Se o nome estiver em branco (ou constar como 'não informado'), a tela assume 'Novo Cadastro'
+        _isNovoUsuario = nomeLocalizado.isEmpty ||
+            nomeLocalizado.toLowerCase() == 'não informado' ||
+            nomeLocalizado.toLowerCase() == '';
 
         // Mapeia o tipo (0 = Prestador, 1 = Visitante)
         final tipo = _cadastroAvulso!['tipovisita']?.toString().toUpperCase() ??
@@ -9816,12 +9906,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       final documentoFiltro = _filtroDocumentoEntradaController.text.trim();
+      if (documentoFiltro.isNotEmpty &&
+          !Utilities.isDocumentoValido(documentoFiltro)) {
+        FeedbackUtils.showWarning(
+            context: context,
+            title: 'Documento Inválido',
+            message: 'Informe um CPF, CNPJ ou RG válido para pesquisar.');
+        setState(() => _erroDocumentoEntrada = true);
+        return;
+      }
 
       final Map<String, dynamic> params = {
         'condominio_id': int.tryParse(condominioId) ?? 0,
         'apto_id': _unidadeFiltroAplicada ?? 0,
         'nome': _filtroNomeEntradaController.text.trim(),
-        'documento': documentoFiltro,
+        'documento': Utilities.removerPontuacao(documentoFiltro),
         'dt_ini': null,
         'dt_fim': null,
         'tipoagendamento': 'S,H,M,A,P,R,K,',
@@ -9861,8 +9960,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (resultados.isNotEmpty) {
           await _processarResultadosBuscaEntrada(resultados);
         } else {
-          // Verificar se foram aplicados filtros de unidade e/ou data/período
-// Verificar se foram aplicados filtros
           final temFiltroUnidade =
               _unidadeFiltroAplicada != null && _unidadeFiltroAplicada! > 0;
           final temFiltroData = _filtroDataEntrada != null;
@@ -9873,37 +9970,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final temFiltroNome =
               _filtroNomeEntradaController.text.trim().isNotEmpty;
 
-          // Se aplicou QUALQUER filtro, mostrar mensagem de "não encontrado" em vez de forçar o cadastro
-          if (temFiltroUnidade ||
-              temFiltroData ||
-              temFiltroPeriodo ||
-              temFiltroDocumento ||
-              temFiltroNome) {
-            _mostrarMensagemAgendamentoNaoEncontrado();
-          } else {
-            // Limpar formulário para novo cadastro
-            _limparFormulario();
-            // Marcar que é novo usuário e preencher documento pesquisado
-            setState(() {
-              _isNovoUsuario = true;
-              _mostrarFormEntrada = true; // Mostrar formulário diretamente
-              // Em agendamentos, não minimizar filtro ao abrir novo usuário - só minimiza quando selecionar usuário
-              if (_tipoFiltroEntrada == 1) {
-                _filtroEntradaMinimizado =
-                    false; // Manter filtro visível em agendamentos
-              } else {
-                _filtroEntradaMinimizado =
-                    true; // Em Avulso, minimizar normalmente
-              }
-              // Preencher documento pesquisado
-              if (_documentoFiltroAplicado != null &&
-                  _documentoFiltroAplicado!.isNotEmpty) {
-                _documentoController.text = _documentoFiltroAplicado!;
-                print(
-                    ' Documento preenchido para novo usuário: $_documentoFiltroAplicado');
-              }
-            });
-          }
+          // Limpar formulário para novo cadastro
+          _limparFormulario();
+          // Marcar que é novo usuário e preencher documento pesquisado
+          setState(() {
+            _isNovoUsuario = true;
+            _mostrarFormEntrada = true; // Mostrar formulário diretamente
+            // Em agendamentos, não minimizar filtro ao abrir novo usuário - só minimiza quando selecionar usuário
+            if (_tipoFiltroEntrada == 1) {
+              _filtroEntradaMinimizado =
+                  false; // Manter filtro visível em agendamentos
+            } else {
+              _filtroEntradaMinimizado =
+                  true; // Em Avulso, minimizar normalmente
+            }
+            // Preencher documento pesquisado
+            if (_documentoFiltroAplicado != null &&
+                _documentoFiltroAplicado!.isNotEmpty) {
+              _documentoController.text = _documentoFiltroAplicado!;
+              print(
+                  ' Documento preenchido para novo usuário: $_documentoFiltroAplicado');
+            }
+          });
         }
       } else {
         print('Erro na busca de entradas: ${response.statusCode}');
@@ -10113,8 +10201,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // Buscar agendamentos filtrados usando a mesma API buscaentrada com período
   Future<void> _buscarAgendamentosEntradaFiltrados(
       {List<Map<String, dynamic>>? espacosSelecionados}) async {
-    print('[DEBUG] _buscarAgendamentosEntradaFiltrados() chamada');
-
     setState(() {
       _loadingBuscaAgendamentos = true;
     });
@@ -10144,15 +10230,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             0, // Usar unidade_id selecionada no filtro
         'nome': _filtroNomeEntradaController.text.trim(),
         'documento': documentoFiltro,
-        // Se a data não for nula, formata para ISO8601 com 'Z' no final, senão passa null
-        'dt_ini': _filtroDataInicioEntrada != null
-            ? '${_filtroDataInicioEntrada!.toIso8601String()}Z'
-            : null,
-        'dt_fim': _filtroDataFimEntrada != null
-            ? '${_filtroDataFimEntrada!.toIso8601String()}Z'
-            : null,
         'tipo': 'AG',
       };
+      if (_filtroDataInicioEntrada != null) {
+        final dIni = _filtroDataInicioEntrada!;
+        params["dt_ini"] =
+            '${dIni.year}-${dIni.month.toString().padLeft(2, '0')}-${dIni.day.toString().padLeft(2, '0')}T00:00:00Z';
+      }
+      if (_filtroDataFimEntrada != null) {
+        final dFim = _filtroDataFimEntrada!;
+        params["dt_fim"] =
+            '${dFim.year}-${dFim.month.toString().padLeft(2, '0')}-${dFim.day.toString().padLeft(2, '0')}T23:59:59Z';
+      }
       // Adicionar espaá§os sociais selecionados no modal
       // Formatar como "M, A, H," usando os valores de flg_reserva
       if (espacosSelecionados != null && espacosSelecionados.isNotEmpty) {
@@ -10196,18 +10285,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         List<Map<String, dynamic>> resultados =
             List<Map<String, dynamic>>.from(responseData['data'] ?? []);
 
-        // Filtrar apenas agendamentos (AG) antes de processar no modo Agendamento
-        final resultadosAgendamentos =
-            resultados.where((r) => r['tipo']?.toString() == 'AG').toList();
         setState(() {
-          _resultadosBuscaEntrada =
-              resultadosAgendamentos; // Armazenar apenas agendamentos
+          _resultadosBuscaEntrada = resultados; // Armazenar apenas agendamentos
           _mostrarFormEntrada = false;
         });
-
+        print("resultados.isNotEmpty: $resultados.isNotEmpty");
         // Para múltiplos resultados, agrupar por reserva_id e buscar convidadolist para cada reserva
-        if (resultadosAgendamentos.isNotEmpty) {
-          await _processarResultadosBuscaEntrada(resultadosAgendamentos,
+        if (resultados.isNotEmpty) {
+          await _processarResultadosBuscaEntrada(resultados,
               apenasAgendamentos: true);
         } else {
           // Verificar se foram aplicados filtros de unidade e/ou período
@@ -10221,18 +10306,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _documentoFiltroAplicado!.isNotEmpty;
           final temFiltroNome =
               _filtroNomeEntradaController.text.trim().isNotEmpty;
-          // Se aplicou QUALQUER filtro, mostrar mensagem de "não encontrado" em vez de forçar o cadastro
-          if (temFiltroUnidade ||
-              temFiltroData ||
-              temFiltroPeriodo ||
-              temFiltroDocumento ||
-              temFiltroNome) {
-            _mostrarMensagemAgendamentoNaoEncontrado();
-          } else {
-            // Quando não há filtros específicos (apenas busca geral), abrir diretamente o formulário vazio para novo usuário
-            // Limpar formulário para novo cadastro
-            _limparFormulario();
-            // Marcar que é novo usuário e preencher documento pesquisado
+
+          // Quando não há filtros específicos (apenas busca geral), abrir diretamente o formulário vazio para novo usuário
+          // Limpar formulário para novo cadastro
+          _limparFormulario();
+          // Marcar que é novo usuário e preencher documento pesquisado
+          if (temFiltroDocumento) {
+            FeedbackUtils.showWarning(
+                context: context,
+                title: 'Documento não localizado',
+                message:
+                    'Nenhum agendamento encontrado, caso queira realize entrada avulsa.');
             setState(() {
               _isNovoUsuario = true;
               _mostrarFormEntrada = true; // Mostrar formulário diretamente
@@ -10250,6 +10334,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _documentoController.text = _documentoFiltroAplicado!;
               }
             });
+          } else {
+            FeedbackUtils.showWarning(
+                context: context,
+                title: 'Agendamentos',
+                message:
+                    'Nenhum agendamento encontrado com filtro(s) utilizado(s).');
           }
         }
       } else {
@@ -10314,12 +10404,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               res['link_foto'].toString() != 'null')
           ? res['link_foto'].toString()
           : (res['foto_id']?.toString() ?? res['foto']?.toString());
-      map['entrada'] = res['dt_entrada'] ??
+      map['dt_entrada'] = res['dt_entrada'] ??
           res['entrada'] ??
           res['data_entrada'] ??
           res['dt_ini'] ??
           '';
-      map['saida'] = res['dt_saida'] ??
+      map['dt_saida'] = res['dt_saida'] ??
           res['saida'] ??
           res['data_saida'] ??
           res['dt_fim'] ??
@@ -10345,8 +10435,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // Busca detalhes completos de um convidado específico via convidadolist
   Future<Map<String, dynamic>?> _obterConvidadoCompleto(
       int reservaId, int reservaConvidadoId) async {
-    print(
-        '[DEBUG] _obterConvidadoCompleto: reserva $reservaId, convidado $reservaConvidadoId');
     try {
       final prefs = await SharedPreferences.getInstance();
       final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
@@ -10359,7 +10447,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       final url = Uri.parse(
-          '${ApiConfig.socialhUrl}/convidadolist?reserva_id=$reservaId&culture=pt-br');
+          '${ApiConfig.socialhUrl}/convidadolist?reserva_id=$reservaId&reservaconvidado_id=$reservaConvidadoId&culture=pt-br');
       final response = await http.post(
         url,
         headers: {
@@ -11273,198 +11361,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  void _mostrarMensagemAgendamentoNaoEncontrado() {
-    final painel = Container(
-      width: MediaQuery.of(context).size.width * 0.48,
-      padding: const EdgeInsets.all(24),
-      child: Card(
-        elevation: 8,
-        shadowColor: Colors.blue.withValues(alpha: 0.2),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                Colors.blue.shade50.withValues(alpha: 0.3),
-              ],
-            ),
-          ),
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header com ícone e título
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade100.withValues(alpha: 0.8),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Icon(
-                          Icons.event_busy,
-                          color: Colors.blue.shade700,
-                          size: 28,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Agendamento não encontrado',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey.shade800,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                          Text(
-                            'Sem resultados para os filtros aplicados',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.close,
-                      color: Colors.grey.shade400,
-                      size: 24,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _mostrarFormEntrada = false;
-                      });
-                      _fecharPainelLateral();
-                    },
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.grey.shade100,
-                      padding: const EdgeInsets.all(8),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 32),
-
-              // ácone principal
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.search_off,
-                  size: 64,
-                  color: Colors.grey.shade400,
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Mensagem
-              Text(
-                'Ops! Não encontramos nenhum agendamento para os filtros aplicados.',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey.shade700,
-                  fontWeight: FontWeight.w500,
-                  height: 1.5,
-                ),
-                textAlign: TextAlign.center,
-              ),
-
-              const SizedBox(height: 16),
-
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.blue.shade200.withValues(alpha: 0.5),
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.lightbulb_outline,
-                      color: Colors.blue.shade600,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Verifique se a unidade e data está£o corretas, ou tente uma busca mais ampla.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue.shade700,
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 32),
-
-              // Botá£o
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    // Fechar painel
-                    _fecharPainelLateral();
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade600,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 2,
-                    shadowColor: Colors.blue.shade200,
-                  ),
-                  child: const Text(
-                    'Entendi',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    _abrirPainelLateral(painel);
-  }
-
   void _abrirPainelNovoUsuarioAvulso() {
     final painel = Container(
       width: MediaQuery.of(context).size.width * 0.4,
@@ -11642,15 +11538,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // Verificar se há apenas um convidado e se já deu entrada
         if (convidados.length == 1) {
           final convidado = convidados[0];
-          final entradaStr =
-              (convidado['entrada'] ?? convidado['dt_entrada'] ?? '')
-                  .toString();
-          final saidaStr = (convidado['saida'] ??
-                  convidado['dt_saida'] ??
-                  convidado['data_saida'] ??
-                  convidado['saida_data'] ??
-                  '')
-              .toString();
+          final entradaStr = (convidado['dt_entrada'] ?? '').toString();
+          final saidaStr = (convidado['dt_saida'] ?? '').toString();
           final jaDeuEntrada = entradaStr.isNotEmpty;
           final jaDeuSaida = saidaStr.isNotEmpty;
 
@@ -12136,7 +12025,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
       final payloadList = {
         "condominio_id": int.tryParse(condominioId) ?? 0,
-        "documento": documento,
+        "documento": Utilities.removerPontuacao(documento),
       };
 
       final responseList = await http.post(
@@ -12167,7 +12056,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
       final payloadSel = {
         "condominio_id": int.tryParse(condominioId) ?? 0,
-        "documento": documento,
+        "documento": Utilities.removerPontuacao(documento),
       };
 
       Map<String, dynamic>? selecionado;
@@ -13207,6 +13096,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
+  bool _isProcessandoSalvar = false;
   Future<void> _salvarDados() async {
     // Verificar campos obrigatórios
     setState(() {
@@ -13228,6 +13118,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
+    if (_isProcessandoSalvar) return;
+    _isProcessandoSalvar = true;
     setState(() {
       _loadingRegistroEntrada = true;
     });
@@ -13247,7 +13139,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       // Após a API retornar sucesso no salvamento do formulário:
       setState(() {
-        _feedbackMessageEntrada = 'Entrada realizada com sucesso!';
+        _feedbackMessageEntrada = 'Entrada avulsa registrada com sucesso!';
         _mostrarFormEntrada = false; // Fecha o formulário
       });
 
@@ -13267,6 +13159,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         errorDetails: e.toString(),
       );
     } finally {
+      _isProcessandoSalvar = false;
       setState(() {
         _loadingRegistroEntrada = false;
       });
@@ -13557,7 +13450,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final payloadEdit = {
           "pessoadocumento_id": 0,
           "nome": _nomeController.text.trim(),
-          "documento": doc,
+          "documento": Utilities.removerPontuacao(doc),
           "tipodoc": (_cadastroAvulso?['tipodoc'] ?? '').isEmpty
               ? 'R'
               : _cadastroAvulso?['tipodoc'],
@@ -13623,10 +13516,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Garantir ID válido para cadastro também
     final validPessoaCadastroId = _convertToValidId(pessoaCadastroId) ?? 0;
 
+    String fotoRostoClean = "";
+    String fotoDocClean = "";
+
+    // 1. GRAVAR FOTO DO ROSTO (ordem_num: 1)
+    if (_fotoRostoEntrada != null &&
+        _fotoRostoEntrada!.isNotEmpty &&
+        !_fotoRostoEntrada!.startsWith('http')) {
+      fotoRostoClean = _fotoRostoEntrada!.contains(',')
+          ? _fotoRostoEntrada!.split(',').last
+          : _fotoRostoEntrada!;
+    }
+
+    // 2. GRAVAR FOTO DO DOCUMENTO (ordem_num: 2)
+    if (_fotoDocumentoEntrada != null &&
+        _fotoDocumentoEntrada!.isNotEmpty &&
+        !_fotoDocumentoEntrada!.startsWith('http')) {
+      fotoDocClean = _fotoDocumentoEntrada!.contains(',')
+          ? _fotoDocumentoEntrada!.split(',').last
+          : _fotoDocumentoEntrada!;
+    }
+
     final payload = {
       "condominio_id": int.tryParse(condominioId) ?? 0,
       "pessoadocumento_id": validPessoadocumentoId,
-      "documento": documento,
+      "documento": Utilities.removerPontuacao(documento),
       "nome": _nomeController.text.trim(),
       "entradacadastro_id": 0,
       "apto_id": _selectedUnidade?['apto_id'] ?? 0,
@@ -13646,16 +13560,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ? '${_dataFimSelecionada!.day.toString().padLeft(2, '0')}/${_dataFimSelecionada!.month.toString().padLeft(2, '0')}/${_dataFimSelecionada!.year} ${_horaFimSelecionada!.hour.toString().padLeft(2, '0')}:${_horaFimSelecionada!.minute.toString().padLeft(2, '0')}:00'
           : '',
       "observacao": _obsController.text,
+      "fotobase64_1": fotoRostoClean,
+      "fotobase64_2": fotoDocClean,
     };
 
     // Adicionar empresa apenas se for P.Serviá§o
     if (_tipoPessoa == 0 && empresa.isNotEmpty) {
       payload["empresa"] = empresa;
     }
-
-    //fotos sao tratadas abaixo
-    payload["fotobase64_1"] = '';
-    payload["fotobase64_2"] = '';
 
     String? rostoParaEnviar;
     String? docParaEnviar;
@@ -13671,117 +13583,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
 
       if (response.statusCode == 200) {
-        // Registrar fotos separadamente
-        // Agora suporta reenvio de fotos (mesmo se for URL) e novas fotos (Base64)
-        // 1. GRAVAR FOTO DO ROSTO (ordem_num: 1)
-        final urlFoto = Uri.parse('${ApiConfig.gateUrl}/FotoRegistrar');
-
-        if (_fotoRostoEntrada != null && _fotoRostoEntrada!.isNotEmpty) {
-          String fotoRostoClean = _fotoRostoEntrada!.contains(',')
-              ? _fotoRostoEntrada!.split(',').last
-              : _fotoRostoEntrada!;
-
-          bool _uploadFoto = true;
-          //caso tenha puxado a foto do servidor
-          if (fotoRostoClean.startsWith('http')) {
-            _uploadFoto = false;
-          }
-
-          if (_uploadFoto) {
-            http.post(
-              urlFoto,
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer $tokenSessao',
-              },
-              body: jsonEncode({
-                "condominio_id": condominioId,
-                "tipoUSU": "",
-                "ordem_num": 1, // 1 = Rosto
-                "pessoacadastro_id": pessoaCadastroId,
-                "foto": fotoRostoClean,
-              }),
-            );
-          }
-        }
-
-        // 2. GRAVAR FOTO DO DOCUMENTO (ordem_num: 2)
-        if (_fotoDocumentoEntrada != null &&
-            _fotoDocumentoEntrada!.isNotEmpty) {
-          final fotoDocClean = _fotoDocumentoEntrada!.contains(',')
-              ? _fotoDocumentoEntrada!.split(',').last
-              : _fotoDocumentoEntrada!;
-
-          bool _uploadFoto = true;
-          //caso tenha puxado a foto do servidor
-          if (fotoDocClean.startsWith('http')) {
-            _uploadFoto = false;
-          }
-
-          if (_uploadFoto) {
-            http.post(
-              urlFoto,
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer $tokenSessao',
-              },
-              body: jsonEncode({
-                "condominio_id": condominioId,
-                "tipoUSU": "",
-                "ordem_num": 2, // 2 = Documento
-                "pessoacadastro_id": pessoaCadastroId,
-                "foto": fotoDocClean,
-              }),
-            );
-          }
-        }
-
         // Mostrar mensagem de sucesso
         final isAbaAvulso = _tipoFiltroEntrada == 0;
-
-        FeedbackUtils.showSuccess(
-          context: context,
-          title:
-              isAbaAvulso ? 'Entrada Avulsa Registrada' : 'Entrada Registrada',
-          message: isAbaAvulso
-              ? 'Entrada avulsa registrada com sucesso!'
-              : 'Nova entrada registrada com sucesso!',
-          triggerKey: _panelEntradaSaidasKey,
-        );
 
         // Sucesso - Preparar card para exibir nos resultados antes de limpar
         final now = DateTime.now();
         final formattedNow =
             '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-
-        final novoConvidado = {
-          'id': validPessoadocumentoId,
-          'pessoadocumento_id': validPessoadocumentoId,
-          'pessoacadastro_id': validPessoaCadastroId,
-          'nome': _nomeController.text.trim(),
-          'convidado_txt': _nomeController.text.trim(),
-          'documento': documento,
-          'documento_txt': documento,
-          'unidade': _selectedUnidade?['unidade_mostra'] ??
-              _selectedUnidade?['nome'] ??
-              '',
-          'unidade_mostra': _selectedUnidade?['unidade_mostra'] ??
-              _selectedUnidade?['nome'] ??
-              '',
-          'entrada': formattedNow,
-          'dt_entrada': formattedNow,
-          'tipo': _tipoFiltroEntrada == 0 ? 'AV' : 'AG',
-          'origem_tab': _tabAvulsoAgendamentosSaidas,
-          'placa': _placaController.text.trim(),
-          'modelo': _modeloController.text.trim(),
-          'foto': rostoParaEnviar,
-          'link_foto': rostoParaEnviar,
-        };
-
-        setState(() {
-          // Adicionar ao histórico geral para visibilidade imediata
-          //_todasPassagens.insert(0, Map<String, dynamic>.from(novoConvidado));
-        });
 
         // Limpar tudo e fechar formulário
         await _limparFormularioEntrada();
@@ -13803,83 +13611,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         message: 'Erro de conexá£o',
         errorDetails: e.toString(),
       );
-    }
-  }
-
-  Future<void> _tirarFotoRostoAnt() async {
-    // Volte para a chamada simples. Exemplo com showDialog:
-    final result = await showDialog(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.5),
-      builder: (ctx) => const FacialCaptureModal(), // Sua modal de captura
-    );
-
-    if (result != null && result is String && result.isNotEmpty) {
-      setState(() {
-        _fotoRostoEntrada = result;
-      });
-    }
-  }
-
-  Future<void> _tirarFotoRostoant1() async {
-    final completer = Completer<String?>();
-    late OverlayEntry overlayEntry;
-
-    overlayEntry = OverlayEntry(
-      builder: (ctx) => ScaffoldMessenger(
-        // 👈 Captura SnackBars nesta camada
-        child: Navigator(
-          // 👈 Captura Dialogs nesta camada
-          onGenerateRoute: (settings) => PageRouteBuilder(
-            opaque: false, // 👈 Mantém o fundo transparente
-            pageBuilder: (navCtx, _, __) => Material(
-              color: Colors.transparent,
-              child: Stack(
-                children: [
-                  // Fundo escuro (Barrier)
-                  Positioned.fill(
-                    child: GestureDetector(
-                      onTap: () {
-                        overlayEntry.remove();
-                        if (!completer.isCompleted) completer.complete(null);
-                      },
-                      child: Container(
-                        color: Colors.black.withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ),
-                  // Modal de Captura
-                  Center(
-                    child: FacialCaptureModal(
-                      onClose: () {
-                        overlayEntry.remove();
-                        if (!completer.isCompleted) completer.complete(null);
-                      },
-                      onCapture: (String fotoBase64) {
-                        overlayEntry.remove();
-                        if (!completer.isCompleted)
-                          completer.complete(fotoBase64);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-
-    // Injeta a tela na camada MAIS ALTA possível do Flutter (acima do painel lateral)
-    Overlay.of(context, rootOverlay: true).insert(overlayEntry);
-
-    // Fica aguardando a interação do usuário na modal
-    final result = await completer.future;
-
-    if (result != null && result.isNotEmpty) {
-      setState(() {
-        _fotoRostoEntrada = result;
-      });
     }
   }
 

@@ -7,6 +7,7 @@ import '../../core/services/crypto_utils.dart';
 import '../../core/config/app_version.dart' as config;
 import '../../shared/widgets/registro_dispositivos_page.dart';
 import '../../core/config/api_config.dart';
+import '../../core/services/condominio_api.dart';
 
 // Funções auxiliares para cores adaptáveis ao tema
 bool isDarkMode(BuildContext context) {
@@ -105,53 +106,6 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
         'UnidadeDetalheScreen initState - permissaoAcessoPessoas: ${widget.permissaoAcessoPessoas}');
     _carregarDadosUnidade();
   }
-
-  // --- Função responsável por registrar o log de acesso ATUALIZADA ---
-  Future<void> _registrarLogVisualizacao(int targetUsuarioId,
-      String nomeUsuario, String conteudoInformacao) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final encryptedToken = prefs.getString('tokensessao_txt') ?? '';
-      final tokenSessao =
-          (encryptedToken.isNotEmpty) ? decryptText(encryptedToken) : '';
-
-      final url = Uri.parse(ApiConfig.getEndpoint('unidade', 'UsuarioLog'));
-
-      final String condominioIdStr = await ApiConfig.getCondominioId();
-      final int condominioId = int.tryParse(condominioIdStr) ?? 0;
-
-// Buscando o IP antes de montar o payload
-      String ipDoUsuario = await config.getDeviceIp();
-
-      final payload = {
-        "condominio_id": condominioId,
-        "usuario_id": targetUsuarioId,
-        "funcoes_id": 134,
-        "usuarioope_id": targetUsuarioId,
-        "ip_addr": ipDoUsuario,
-        "texto_detalhe":
-            "Visualização de dado sensível: $conteudoInformacao (Usuário: $nomeUsuario)",
-      };
-
-      print('📝 Disparando log de visualização: $payload');
-
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        body: jsonEncode(payload),
-      );
-
-      if (response.statusCode != 200) {
-        print('⚠️ Falha ao registrar log. Status: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('⚠️ Erro ao registrar log de visualização: $e');
-    }
-  }
-  // ---------------------------------------------------------
 
   Future<void> _carregarDadosUnidade() async {
     setState(() => _loading = true);
@@ -980,7 +934,7 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
                           _revealedPii.remove(key);
                         } else {
                           _revealedPii.add(key);
-                          _registrarLogVisualizacao(
+                          CondominioApi.registrarLogVisualizacao(
                               id, title, title); // <-- Passando "Nome"
                         }
                       });
@@ -1013,7 +967,7 @@ class _UnidadeDetalheScreenState extends State<UnidadeDetalheScreen> {
                             _revealedPii.remove(key);
                           } else {
                             _revealedPii.add(key);
-                            _registrarLogVisualizacao(id, title,
+                            CondominioApi.registrarLogVisualizacao(id, title,
                                 phone ?? ''); // <-- Passando "Telefone"
                           }
                         });

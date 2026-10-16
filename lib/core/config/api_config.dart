@@ -3,6 +3,12 @@ import '../services/crypto_utils.dart';
 import '../localization/app_localizations.dart';
 
 class ApiConfig {
+  // APIs externas
+  static const String ipCheckUrl = 'https://api.ipify.org';
+  static const String ocrUrl = 'https://api.ocr.space/parse/image';
+  static const String imageUrl =
+      'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/';
+
   // URLs base da API - agora com suporte a internacionalização
   static String get baseUrl {
     final language = AppLocalizations.currentLanguage;
@@ -24,10 +30,6 @@ class ApiConfig {
         ? 'https://socialh.conectcon.net.br/en'
         : 'https://socialh.conectcon.net.br/pt-br';
   }
-
-  // APIs externas
-  static const String ipCheckUrl = 'https://api.ipify.org';
-  static const String ocrUrl = 'https://api.ocr.space/parse/image';
 
   // Mapa de endpoints organizados por módulo
   static Map<String, Map<String, String>> get endpoints {
@@ -53,6 +55,7 @@ class ApiConfig {
         'encriptcns': '$socialhUrl/encriptcns',
         'CondominioGeoPosicao': '$socialhUrl/CondominioGeoPosicao',
         'espacosociallist': '$socialhUrl/espacosociallist',
+        'agenda': '$socialhUrl/CondominioAgenda',
       },
       'ramais': {
         'lista': '$socialhUrl/ramaislist',

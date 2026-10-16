@@ -191,7 +191,6 @@ class SignalRService {
 
   // Contrato para atualizar o status de leitura da passagem no servidor via WebSocket
   Future<void> PassagemUpdateTela(dynamic id) async {
-    print('[SignalR] entrou PassagemUpdateTela com id: $id');
     if (_isDisposed || _hubConnection == null || !isConnected) return;
     try {
       // 1. Criamos o mapa (objeto JSON)
@@ -199,8 +198,6 @@ class SignalRService {
       final int idInt = int.parse(id.toString());
       // 2. Enviamos o payload dentro da lista de argumentos
       await _hubConnection!.invoke("PassagemUpdateTela", args: [idInt]);
-
-      print('[SignalR] 📤 Invoke: PassagemUpdateTela($payload)');
     } catch (e) {
       print('[SignalR] ❌ Erro ao invocar PassagemUpdateTela: $e');
     }
@@ -216,24 +213,20 @@ class SignalRService {
     try {
       _hubConnection!.off("PassagemListar");
       _hubConnection!.off("PassagensUpdate");
-      _hubConnection!.off("Comandos");
+      //_hubConnection!.off("Comandos");
     } catch (_) {}
 
     // Handler Unificado de Passagens
     _hubConnection!.on("PassagemListar", (args) {
-      // print('🔔 [SignalR] EVENTO "PassagemListar" RECEBIDO!'); // Verbose
       _processPassagensData(args);
     });
 
     _hubConnection!.on("PassagensUpdate", (args) {
-      print('🔔 [SignalR] EVENTO "PassagensUpdate" RECEBIDO!');
       _processPassagensData(args);
     });
 
     // Opcional: Handler para Comandos se existir retorno
-    _hubConnection!.on("Comandos", (args) {
-      print('🔔 [SignalR] EVENTO "Comandos" RECEBIDO: $args');
-    });
+    //_hubConnection!.on("Comandos", (args) {});
 
     _hubConnection!.onclose((error) {
       print('[SignalR] onclose (Terminado): $error');

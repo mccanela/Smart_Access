@@ -96,7 +96,7 @@ await _hubConnection!.invoke("PassagemListar", args: [condominioId]);
 Os dados do SignalR agora incluem o campo `link_foto` com a URL da imagem:
 ```json
 {
-  "link_foto": "https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/geral/botoeira.jpg"
+  "link_foto": imageUrl + "geral/botoeira.jpg"
 }
 ```
 

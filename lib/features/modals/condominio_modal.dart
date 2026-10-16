@@ -21,6 +21,8 @@ import '../../shared/widgets/character_counter_field.dart';
 import 'aviso_expandable_item.dart';
 import '../../shared/widgets/expandable_tabs.dart';
 import '../../core/utils/ui_standards.dart';
+import '../../core/services/condominio_api.dart';
+import '../../core/theme/cupertino_colors_service.dart';
 
 // Grupo de ícones transparentes genérico
 Widget _buildTransparentIconGroup(
@@ -166,6 +168,11 @@ class _CondominioModalState extends State<CondominioModal>
   String? _urlMapaGaragem;
   bool _loadingInfo = true;
   PdfController? _pdfController;
+  bool _loadingAgenda = false;
+  List<Map<String, dynamic>> _agendaList = [];
+  DateTime _selectedDate = DateTime.now();
+  DateTime _currentMonth =
+      DateTime(DateTime.now().year, DateTime.now().month, 1);
 
   // Helper for Standard Search Decoration
   InputDecoration _standardSearchDecoration(BuildContext context,
@@ -253,12 +260,14 @@ class _CondominioModalState extends State<CondominioModal>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
+
     _fetchEndereco();
     _fetchCorpoDiretivo();
     _fetchCondominioInfo();
     _fetchTerceirizados();
     _fetchAvisosInternos();
+    _fetchAgenda(_currentMonth);
   }
 
   @override
@@ -267,6 +276,32 @@ class _CondominioModalState extends State<CondominioModal>
     _searchTerceirizadosController.dispose();
     _searchAvisosController.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchAgenda(DateTime mesRef) async {
+    setState(() {
+      _loadingAgenda = true;
+    });
+
+    try {
+      final condominioId = await ApiConfig.getCondominioId();
+
+      // Formata a data para YYYY-MM-01 (Ex: 2026-09-01)
+      final String dataParam =
+          '${mesRef.year}-${mesRef.month.toString().padLeft(2, '0')}-01';
+
+      final response = await CondominioApi.Agenda(dataParam);
+      final listData = response;
+
+      setState(() {
+        _agendaList = List<Map<String, dynamic>>.from(listData);
+        _loadingAgenda = false;
+      });
+    } catch (e) {
+      setState(() {
+        _loadingAgenda = false;
+      });
+    }
   }
 
   Future<void> _fetchEndereco() async {
@@ -723,6 +758,7 @@ class _CondominioModalState extends State<CondominioModal>
                       physics:
                           const NeverScrollableScrollPhysics(), // Disable swipe to avoid conflict with complex animations if needed, or keep it.
                       children: [
+                        _buildAgendaTab(),
                         _buildEnderecoTab(),
                         _buildCorpoDiretivoTab(),
                         _buildRegimentoTab(),
@@ -745,6 +781,11 @@ class _CondominioModalState extends State<CondominioModal>
   late TabController _tabController;
 
   final List<Map<String, dynamic>> _tabsInfo = [
+    {
+      'icon': Icons.calendar_month_outlined,
+      'key': 'agenda',
+      'label': 'Agenda do condomínio'
+    },
     {'icon': Icons.location_on_outlined, 'key': 'address', 'label': 'Endereço'},
     {
       'icon': Icons.people_outline,
@@ -1295,7 +1336,302 @@ class _CondominioModalState extends State<CondominioModal>
       ],
     );
   }
+// --- FUNÇÕES DA TAB DE AGENDA ---
 
+  List<Map<String, dynamic>> _getEventsForDay(DateTime day) {
+    return _agendaList.where((evento) {
+      final dataStr = evento['data_ini'] as String? ?? '';
+      if (dataStr.isEmpty) return false;
+
+      // Assumindo formato "DD/MM/YYYY HH:mm:ss"
+      try {
+        final parts = dataStr.split(' ')[0].split('/');
+        final eventDate = DateTime(
+          int.parse(parts[2]),
+          int.parse(parts[1]),
+          int.parse(parts[0]),
+        );
+        return eventDate.year == day.year &&
+            eventDate.month == day.month &&
+            eventDate.day == day.day;
+      } catch (e) {
+        return false;
+      }
+    }).toList();
+  }
+
+  bool _hasEvents(DateTime day) {
+    return _getEventsForDay(day).isNotEmpty;
+  }
+
+  Widget _buildAgendaTab() {
+    final isDark = isDarkMode(context);
+    final eventsToday = _getEventsForDay(_selectedDate);
+
+    const meses = [
+      '',
+      'Janeiro',
+      'Fevereiro',
+      'Março',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro'
+    ];
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // --- ESQUERDA: CALENDÁRIO ---
+        Expanded(
+          flex: 1,
+          child: Column(
+            children: [
+              // Cabeçalho com paginação
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left, size: 20),
+                    onPressed: () {
+                      setState(() {
+                        _currentMonth = DateTime(
+                            _currentMonth.year, _currentMonth.month - 1, 1);
+                      });
+                      _fetchAgenda(_currentMonth); // DISPARA A API DO NOVO MÊS
+                    },
+                  ),
+                  Text(
+                    '${meses[_currentMonth.month]} ${_currentMonth.year}',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : const Color(0xFF333333),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right, size: 20),
+                    onPressed: () {
+                      setState(() {
+                        _currentMonth = DateTime(
+                            _currentMonth.year, _currentMonth.month + 1, 1);
+                      });
+                      _fetchAgenda(_currentMonth); // DISPARA A API DO NOVO MÊS
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Dias da Semana
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: ['Do', 'Se', 'Te', 'Qu', 'Qu', 'Se', 'Sa'].map((dia) {
+                  return Expanded(
+                    child: Center(
+                      child: Text(
+                        dia,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 8),
+
+              // Grid de Dias (Com Loading centralizado se estiver carregando)
+              Expanded(
+                child: _loadingAgenda
+                    ? const Center(child: CircularProgressIndicator())
+                    : _buildCalendarGrid(),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(width: 24),
+
+        // --- DIREITA: ATIVIDADES DO DIA ---
+        Expanded(
+          flex: 1,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 16),
+                child: Text(
+                  'Atividades dia ${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : const Color(0xFF333333),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _loadingAgenda
+                    ? const Center(child: CircularProgressIndicator())
+                    : eventsToday.isEmpty
+                        ? Text(
+                            'Nenhuma atividade programada.',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: isDark
+                                  ? CupertinoColorsService.activeOrange
+                                  : CupertinoColorsService.activeOrange,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: eventsToday.length,
+                            separatorBuilder: (context, index) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final event = eventsToday[index];
+                              // Extrai apenas a hora do "data_ini"
+                              final timeStr =
+                                  (event['data_ini'] ?? '').split(' ').length >
+                                          1
+                                      ? (event['data_ini'])
+                                          .split(' ')[1]
+                                          .substring(0, 5)
+                                      : '';
+                              return Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? CupertinoColorsService.tabBar2
+                                      : CupertinoColorsService.systemCyan,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      timeStr,
+                                      style: TextStyle(
+                                        fontSize: 30,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black54,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Icon(Icons.calendar_month,
+                                        size: 14,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black54),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        event['evento'] ?? 'Evento',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: isDark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCalendarGrid() {
+    int daysInMonth =
+        DateUtils.getDaysInMonth(_currentMonth.year, _currentMonth.month);
+    int firstWeekday =
+        DateTime(_currentMonth.year, _currentMonth.month, 1).weekday;
+    int offset =
+        firstWeekday == 7 ? 0 : firstWeekday; // Ajuste para Domingo = 0
+
+    return GridView.builder(
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 7,
+        childAspectRatio: 1.2,
+      ),
+      itemCount: 42,
+      itemBuilder: (context, index) {
+        if (index < offset || index >= daysInMonth + offset) {
+          return const SizedBox.shrink();
+        }
+
+        int day = index - offset + 1;
+        DateTime date = DateTime(_currentMonth.year, _currentMonth.month, day);
+        bool isSelected = _selectedDate.year == date.year &&
+            _selectedDate.month == date.month &&
+            _selectedDate.day == date.day;
+
+        bool isToday = DateTime.now().year == date.year &&
+            DateTime.now().month == date.month &&
+            DateTime.now().day == date.day;
+
+        bool hasEvent = _hasEvents(date);
+
+        // Cores conforme a imagem
+        Color? bgColor;
+        Color textColor = isDarkMode(context) ? Colors.white : Colors.black87;
+
+        if (isSelected) {
+          bgColor = CupertinoColorsService.tabBar2; // Azul Escuro - Selecionado
+          textColor = CupertinoColorsService.white;
+        } else if (isToday) {
+          bgColor = CupertinoColorsService.systemYellow; // Amarelo - Hoje
+          textColor = Colors.white;
+        } else if (hasEvent) {
+          bgColor = CupertinoColorsService.systemCyan; // Azul Claro - Eventos
+          textColor = Colors.white;
+        }
+
+        return GestureDetector(
+          onTap: () {
+            setState(() {
+              _selectedDate = date;
+            });
+          },
+          child: Container(
+            margin: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: bgColor ?? Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              day.toString(),
+              style: TextStyle(
+                color: textColor,
+                fontWeight: isSelected || hasEvent
+                    ? FontWeight.bold
+                    : FontWeight.normal,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 //-----------------------------//

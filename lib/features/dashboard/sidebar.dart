@@ -51,7 +51,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
   bool _openSettingsToRight =
       false; // Define se o menu abre para o lado ou para cima
   String _urlEncomendas =
-      'https://encomenda.conectcon.net.br/'; // Nome do porteiro para tooltip
+      'https://smartmail.conectcon.net.br/'; // Nome do porteiro para tooltip
   String _urlGestor =
       'https://smart-manager-7ji.pages.dev/'; // Nome do porteiro para tooltip
 
@@ -624,7 +624,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                         width: logoSize,
                         height: logoSize,
                         child: Image.network(
-                          'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/geral/rodape_oficial_cns.png',
+                          '${ApiConfig.imageUrl}geral/rodape_oficial_cns.png',
                           fit: BoxFit.contain,
                           errorBuilder: (context, error, stackTrace) =>
                               const Icon(

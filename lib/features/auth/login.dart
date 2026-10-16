@@ -294,7 +294,7 @@ class _LoginPageState extends State<LoginPage> {
     final payload = {
       "email_txt": _userController.text.trim(),
       "senha_txt": _passController.text,
-      "perfilparam_id": 0,
+      "perfilparam_id": 3,
     };
     try {
       final response = await http.post(
@@ -412,7 +412,7 @@ class _LoginPageState extends State<LoginPage> {
               "atualizadisp_flg": sessao['atualizadisp_flg'] ?? '',
               "atualizadisp_txt": sessao['atualizadisp_txt'] ?? '',
               "tokensessao_txt": sessao['tokensessao_txt'] ?? '',
-              "versao_txt": "1.0",
+              "versao_txt": appVersion,
             };
             final createSessaoUrl = Uri.parse(
               ApiConfig.getEndpoint('auth', 'createSession'),
@@ -673,7 +673,7 @@ class _LoginPageState extends State<LoginPage> {
                       children: [
                         if (_admId != null && _admId!.isNotEmpty) ...[
                           _buildExtraBubble(
-                              'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/adms/$_admId/imagens/logo.jpg',
+                              '${ApiConfig.imageUrl}adms/$_admId/imagens/logo.jpg',
                               90),
                           const SizedBox(width: 20),
                         ],
@@ -705,7 +705,7 @@ class _LoginPageState extends State<LoginPage> {
                             _prestadorId!.isNotEmpty) ...[
                           const SizedBox(width: 20),
                           _buildExtraBubble(
-                              'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/patrocinador/$_prestadorId/imagens/logo.jpg',
+                              '${ApiConfig.imageUrl}patrocinador/$_prestadorId/imagens/logo.jpg',
                               90),
                         ],
                       ],
@@ -906,7 +906,7 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             if (_admId != null && _admId!.isNotEmpty) ...[
               _buildExtraBubble(
-                  'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/adms/$_admId/imagens/logo.jpg',
+                  '${ApiConfig.imageUrl}adms/$_admId/imagens/logo.jpg',
                   isMobile ? 80 : 100),
               const SizedBox(width: 10),
             ],
@@ -941,7 +941,7 @@ class _LoginPageState extends State<LoginPage> {
                 _prestadorId!.isNotEmpty) ...[
               const SizedBox(width: 10),
               _buildExtraBubble(
-                  'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/patrocinador/$_prestadorId/imagens/logo.jpg',
+                  '${ApiConfig.imageUrl}patrocinador/$_prestadorId/imagens/logo.jpg',
                   isMobile ? 80 : 100),
             ],
           ],

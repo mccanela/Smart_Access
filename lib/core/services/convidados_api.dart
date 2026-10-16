@@ -72,31 +72,20 @@ class ConvidadosApi {
         ? decryptText(encryptedCondominioId)
         : '';
 
-    final url = Uri.parse(
-      ApiConfig.getUrl(
-        'convidados',
-        'entradasaida',
-        params: {
-          'reserva_id': reservaId,
-          // Só adiciona a chave no Map se a condição for verdadeira
-          if (reservaConvidadoId != null &&
-              reservaConvidadoId.trim().isNotEmpty)
-            'reservaconvidado_id': reservaConvidadoId,
-          'culture': 'pt-br',
-        },
-      ),
-    );
+    final url = Uri.parse(ApiConfig.getEndpoint('convidados', 'entradasaida'));
+    final payload = {
+      'reserva_id': int.tryParse(reservaId) ?? 0,
+      'reservaconvidado_id': reservaConvidadoId,
+    };
 
-    final response = await http.post(url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tokenSessao',
-        },
-        // Enviando também no body para garantir compatibilidade com a API
-        body: jsonEncode({
-          "condominio_id": condominioId,
-          "reserva_id": int.tryParse(reservaId) ?? 0
-        }));
+    final response = await http.post(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $tokenSessao',
+      },
+      body: jsonEncode(payload),
+    );
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);

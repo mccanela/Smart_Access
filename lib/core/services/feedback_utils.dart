@@ -32,38 +32,6 @@ class FeedbackUtils {
     );
   }
 
-  /// Helper privado para mostrar notificação overlay
-  static void _showOverlayx1({
-    required BuildContext context,
-    required String title,
-    required String message,
-    required bool isSuccess,
-    bool isWarning = false,
-    GlobalKey? triggerKey, // Added to target specific button
-  }) {
-    // Remove notificação anterior se existir
-    _currentOverlay?.remove();
-    _currentOverlay = null;
-
-    final overlayState = Overlay.of(context);
-
-    _currentOverlay = OverlayEntry(
-      builder: (context) => ToastNotification(
-        title: title,
-        message: message,
-        isSuccess: isSuccess,
-        isWarning: isWarning,
-        triggerKey: triggerKey, // Pass to toast for positioning
-        onDismiss: () {
-          _currentOverlay?.remove();
-          _currentOverlay = null;
-        },
-      ),
-    );
-
-    overlayState.insert(_currentOverlay!);
-  }
-
   static void _showOverlay({
     required BuildContext context,
     required String title,
@@ -76,64 +44,107 @@ class FeedbackUtils {
     _currentOverlay?.remove();
     _currentOverlay = null;
 
-    final overlayState = Overlay.of(context);
+    final overlayState = Overlay.of(context, rootOverlay: true);
 
-    // 1. Configuração de posicionamento padrão (Canto inferior direito, como estava antes)
-    double? top;
-    double? bottom = 20;
-    double? left;
-    double? right = 20;
-    double? width;
+    // 1. Definição de cores baseadas no status da operação
+    final bgColor = isSuccess
+        ? const Color(0xFFE8F5E9)
+        : (isWarning ? const Color(0xFFFFF3E0) : const Color(0xFFFFEBEE));
+    final borderColor = isSuccess
+        ? const Color(0xFF4CAF50)
+        : (isWarning ? const Color(0xFFFF9800) : const Color(0xFFF44336));
+    final iconData = isSuccess
+        ? Icons.check_circle_outline
+        : (isWarning ? Icons.warning_amber_rounded : Icons.error_outline);
+    final iconColor = isSuccess
+        ? const Color(0xFF2E7D32)
+        : (isWarning ? const Color(0xFFEF6C00) : const Color(0xFFC62828));
 
-    // 2. Se a chave do Box foi passada, recalculamos para brotar dentro dele!
-    if (triggerKey != null && triggerKey.currentContext != null) {
-      final renderBox =
-          triggerKey.currentContext!.findRenderObject() as RenderBox;
-      final position =
-          renderBox.localToGlobal(Offset.zero); // Posição X e Y do Box na tela
-      final size = renderBox.size; // Largura e Altura do Box
-
-      // Alinha nas laterais internas do Box (com 16px de folga em cada lado)
-      left = position.dx + 16;
-      width = size.width - 32;
-
-      // Posiciona próximo ao fundo do Box.
-      // Nota: Se o seu Toast sumir ou cortar, mude esse '- 85' para mais ou para menos
-      // dependendo da altura real do seu card de aviso.
-      top = position.dy + size.height - 85;
-
-      // Anula as posições padrão do canto da tela
-      bottom = null;
-      right = null;
-    }
-
-    // 3. Monta o Overlay com as coordenadas calculadas
-    _currentOverlay = OverlayEntry(
-      builder: (context) => Positioned(
-        top: top,
-        bottom: bottom,
-        left: left,
-        right: right,
-        width: width, // Aplica a largura responsiva do Box aqui
-        child: Material(
-          color: Colors
-              .transparent, // Evita fundo preto ou sublinhados amarelos no texto
-          child: ToastNotification(
-            title: title,
-            message: message,
-            isSuccess: isSuccess,
-            isWarning: isWarning,
-            triggerKey: triggerKey,
-            onDismiss: () {
-              _currentOverlay?.remove();
-              _currentOverlay = null;
-            },
-          ),
+    // 2. Construção de um Toast NATIVO e BLINDADO (Garante que nunca dará erro de Layout/Tela Cinza)
+    Widget toastContent = Material(
+      color: Colors.transparent,
+      child: Container(
+        width:
+            350, // 👈 Largura fixa para impedir expansão infinita e erros de tela!
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor, width: 1.5),
+          boxShadow: const [
+            BoxShadow(
+                color: Colors.black26, blurRadius: 10, offset: Offset(0, 4))
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(iconData, color: iconColor, size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize
+                    .min, // 👈 Altura se adapta ao conteúdo com segurança
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.black87)),
+                  const SizedBox(height: 4),
+                  Text(message,
+                      style:
+                          const TextStyle(fontSize: 14, color: Colors.black87)),
+                ],
+              ),
+            ),
+            InkWell(
+              onTap: () {
+                _currentOverlay?.remove();
+                _currentOverlay = null;
+              },
+              child: const Icon(Icons.close, size: 20, color: Colors.black54),
+            ),
+          ],
         ),
       ),
     );
 
+    Widget overlayChild;
+
+    // 3. Posicionamento seguro
+    if (triggerKey != null && triggerKey.currentContext != null) {
+      final renderBox =
+          triggerKey.currentContext!.findRenderObject() as RenderBox;
+      final position = renderBox.localToGlobal(Offset.zero);
+      final size = renderBox.size;
+
+      overlayChild = Positioned(
+        left: position.dx + 16,
+        top: position.dy + size.height - 85,
+        child: toastContent,
+      );
+    } else {
+      // Posição flutuante exata no canto inferior direito
+      overlayChild = Positioned(
+        bottom: 30,
+        right: 30,
+        child: toastContent,
+      );
+    }
+
+    // 4. Injeta na tela
+    _currentOverlay = OverlayEntry(builder: (context) => overlayChild);
     overlayState.insert(_currentOverlay!);
+
+    // 5. Timer de autodestruição para limpar a notificação da tela
+    Future.delayed(const Duration(seconds: 4), () {
+      if (_currentOverlay != null) {
+        _currentOverlay?.remove();
+        _currentOverlay = null;
+      }
+    });
   }
 
   /// Mostra feedback de sucesso (Não bloqueante)

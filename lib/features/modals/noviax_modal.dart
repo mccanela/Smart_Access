@@ -329,7 +329,7 @@ class _ConectConIAPanelState extends State<ConectConIAPanel> {
                   message:
                       'NOVIA-X é a inteligência artificial que te auxilia buscando informações na convenção, regimento interno e plano operacional da portaria.', // <--- Isso funciona como o "title" do HTML
                   child: Image.network(
-                    'https://pub-9313ea4eec6c404c845254ee76d0a174.r2.dev/geral/noviax.png',
+                    '${ApiConfig.imageUrl}geral/noviax.png',
                     height: 180,
                     width: double.infinity,
                     fit: BoxFit.cover,
